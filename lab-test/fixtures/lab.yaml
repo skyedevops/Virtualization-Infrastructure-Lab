@@ -1,0 +1,85 @@
+# =============================================================================
+# lab-test/fixtures/lab.yaml - synthetic lab for the labctl e2e test
+# =============================================================================
+# This file is consumed ONLY by the integration test
+# tests/integration/test_apply_e2e.py and is wired to the fake Proxmox
+# container built from lab-test/fake-pve/Dockerfile.
+#
+# Host + port are picked at runtime by the test (see conftest.py) and
+# substituted into `hypervisors.pve01.host` via sed before labctl runs.
+# What stays the same is the shape: one proxmox host, three VMs, two
+# networks.  Small enough to keep the test fast, large enough to cover
+# the multi-VM loop in cmd_apply.
+# =============================================================================
+
+lab:
+  name: labctl-e2e
+  version: "1.0"
+  timezone: UTC
+  dns_search: lab.local
+  dns_servers: [10.10.20.10, 1.1.1.1]
+  ntp_servers: [10.10.20.10, pool.ntp.org]
+
+hypervisors:
+  pve01:
+    type: proxmox
+    host: 127.0.0.1
+    ssh_user: root
+    ssh_port: 2226
+    ssh_key: /workspaces/Virtualization-Infrastructure-Lab/lab-test/fixtures/id_ed25519
+    ssh_options: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    default_bridge: vmbr0
+    default_storage: local-lvm
+    iso_storage: local
+
+networks:
+  mgmt:
+    vlan_id: 10
+    subnet: 10.10.10.0/24
+    gateway: 10.10.10.1
+    dhcp: false
+  servers:
+    vlan_id: 20
+    subnet: 10.10.20.0/24
+    gateway: 10.10.20.1
+    dhcp: false
+
+vms:
+  - name: ctrl01
+    hypervisor: pve01
+    role: controller
+    network: mgmt
+    cpu: 2
+    memory_mb: 1024
+    disk_gb: 20
+    vmid: 9001
+    start_order: 10
+    onboot: true
+    notes: e2e test VM #1
+
+  - name: node01
+    hypervisor: pve01
+    role: worker
+    network: servers
+    secondary_networks: [mgmt]
+    cpu: 2
+    memory_mb: 1024
+    disk_gb: 20
+    vmid: 9002
+    start_order: 20
+    onboot: true
+    notes: e2e test VM #2
+
+  - name: node02
+    hypervisor: pve01
+    role: worker
+    network: servers
+    secondary_networks: [mgmt]
+    cpu: 2
+    memory_mb: 1024
+    disk_gb: 20
+    vmid: 9003
+    iso: ubuntu-22.04-server-amd64.iso
+    start_order: 21
+    onboot: true
+    notes: e2e test VM #3 - with ISO + boot order

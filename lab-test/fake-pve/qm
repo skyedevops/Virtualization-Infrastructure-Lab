@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# qm - a fake Proxmox qm shim used by the labctl integration test.
+# Logs every call to /var/log/lab/qm.log and writes a JSON line to
+# /var/lib/lab/state.json representing the "VM" it would have created.
+#
+# Supported subcommands (the ones labctl.py uses):
+#   create   parse flags, write VM record to state.json
+#   set      log only
+#   start    flip status -> "running"
+#   stop     flip status -> "stopped"
+#   shutdown alias of stop
+#   list     print a `qm list`-shaped table
+#   status   print one VM record
+#   destroy  remove a VM record
+
+set -euo pipefail
+
+# Pull in any test-time knobs from /etc/lab-test.conf.  Format: KEY=value.
+if [[ -r /etc/lab-test.conf ]]; then
+  # shellcheck disable=SC1091
+  set -a; source /etc/lab-test.conf; set +a
+fi
+
+LOG_DIR=/var/log/lab
+STATE_FILE=/var/lib/lab/state.json
+mkdir -p "$LOG_DIR" "$(dirname "$STATE_FILE")"
+# Initialise state.json as a JSON object (not empty) so jq can do
+# `.vms += [...]` on it.  Idempotent: re-init only if missing or invalid.
+if [[ ! -s "$STATE_FILE" ]] || ! jq -e . "$STATE_FILE" >/dev/null 2>&1; then
+  printf '{"vms":[]}\n' > "$STATE_FILE"
+fi
+
+{
+  echo "--- $(date -Is) ---"
+  echo "args: $*"
+} >> "$LOG_DIR/qm.log"
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  create)
+    # qm create <vmid> --name X --memory M --cores C --net0 ... --scsi0 ... --ostype ... --agent ...
+    vmid=""
+    name=""
+    memory=""
+    cores=""
+    net0=""
+    scsi0=""
+    ostype=""
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --name)   name="$2";   shift 2 ;;
+        --memory) memory="$2"; shift 2 ;;
+        --cores)  cores="$2";  shift 2 ;;
+        --net0)   net0="$2";   shift 2 ;;
+        --scsi0)  scsi0="$2";  shift 2 ;;
+        --ostype) ostype="$2"; shift 2 ;;
+        --agent)  shift 2 ;;
+        --scsihw) shift 2 ;;
+        [0-9]*)   vmid="$1";   shift ;;
+        *) shift ;;
+      esac
+    done
+    echo "create: vmid=$vmid name=$name memory=$memory cores=$cores net=$net0 scsi=$scsi0 ostype=$ostype" >> "$LOG_DIR/qm.log"
+    # Optional fault injection: a comma-separated list of VMIDs in
+    # $QM_FAIL_VMIDS will cause `create` to exit non-zero without
+    # writing to state.json.  Used by the --keep-going test.
+    if [[ -n "${QM_FAIL_VMIDS:-}" ]]; then
+      IFS=',' read -r -a fails <<< "$QM_FAIL_VMIDS"
+      for f in "${fails[@]}"; do
+        if [[ "$f" == "$vmid" ]]; then
+          echo "simulated failure for vmid=$vmid" >&2
+          exit 1
+        fi
+      done
+    fi
+    tmp=$(mktemp)
+    jq --arg vmid "$vmid" \
+       --arg name "$name" \
+       --argjson memory "$memory" \
+       --argjson cores "$cores" \
+       --arg net "$net0" \
+       --arg scsi "$scsi0" \
+       --arg ostype "$ostype" \
+       '.vms += [{vmid:$vmid, name:$name, memory:$memory, cores:$cores, net:$net, scsi:$scsi, ostype:$ostype, status:"created"}]' \
+       "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    echo "created VM $vmid ($name)" >&2
+    ;;
+  set)
+    vmid="${1:-}"; shift
+    echo "set: vmid=$vmid $*" >> "$LOG_DIR/qm.log"
+    ;;
+  start)
+    vmid="${1:-}"
+    echo "start: vmid=$vmid" >> "$LOG_DIR/qm.log"
+    tmp=$(mktemp)
+    jq --arg vmid "$vmid" '(.vms[] | select(.vmid == $vmid) | .status) = "running"' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    ;;
+  stop|shutdown)
+    vmid="${1:-}"
+    echo "stop: vmid=$vmid" >> "$LOG_DIR/qm.log"
+    tmp=$(mktemp)
+    jq --arg vmid "$vmid" '(.vms[] | select(.vmid == $vmid) | .status) = "stopped"' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    ;;
+  destroy)
+    vmid="${1:-}"
+    echo "destroy: vmid=$vmid" >> "$LOG_DIR/qm.log"
+    tmp=$(mktemp)
+    jq --arg vmid "$vmid" '.vms |= map(select(.vmid != $vmid))' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    ;;
+  list)
+    jq -r '.vms[]? | "\(.vmid) \(.name) \(.status) \(.memory) 0 \(.scsi)"' "$STATE_FILE" 2>/dev/null \
+      | awk 'BEGIN{print "VMID NAME STATUS MEM(MB) BOOTDISK(GB) PID"} {print}'
+    ;;
+  status)
+    vmid="${2:-}"
+    jq --arg vmid "$vmid" '.vms[] | select(.vmid == $vmid)' "$STATE_FILE" 2>/dev/null
+    ;;
+  *)
+    echo "qm: unsupported fake command: $cmd" >&2
+    exit 2
+    ;;
+esac

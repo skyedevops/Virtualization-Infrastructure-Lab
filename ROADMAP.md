@@ -41,8 +41,10 @@ Documentation and reproducibility polish. No new lab hardware.
 - [x] Single-file inventory of every VM in the lab (`lab.yaml`)
 - [x] `scripts/python/labctl.py` - the runner, with per-hypervisor command generators
 - [x] `docs/lab-yaml-schema.md` - schema reference + validation rules
-- [ ] Idempotent `bootstrap.sh` / `bootstrap.ps1` that builds a fresh lab from scratch (deferred to v2.0)
-- [ ] `apply` is still dry-run; real provisioning needs the SSH/WinRM transport in v2.0
+- [x] Idempotent `scripts/bootstrap/bootstrap.sh` + `bootstrap.ps1` (Step 4-5)
+- [x] SSH + HyperV transport + real `apply --execute --yes` over SSH (Step 1-3)
+- [x] End-to-end test of `labctl apply` against a fake Proxmox container
+       (`tests/integration/test_apply_e2e.py`, 11 cases; see `docs/bootstrap-test.md`)
 
 ### v1.5 - CI for the Scripts
 - [x] GitHub Actions: bash `shellcheck`, python `ruff`/`pytest`, powershell `PSScriptAnalyzer`
