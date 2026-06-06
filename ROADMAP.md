@@ -3,6 +3,12 @@
 A living document. Dates are estimates, not commitments. Items move
 between lists as work progresses.
 
+> Every item below is mirrored as a GitHub Issue with the `roadmap`
+> label plus a `phase/vN.M` label, so filtering by phase (e.g.
+> `is:open label:phase/v2.1`) gives you the live backlog for that
+> milestone.  Re-sync after a tick with
+> `scripts/seed-roadmap-issues.sh --close-done`.
+
 ---
 
 ## Status Snapshot

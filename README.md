@@ -100,6 +100,7 @@ See [docs/lab-topology.md](docs/lab-topology.md) for the full network and storag
 5. Establish your snapshot and backup baseline from `snapshots-backup/README.md`.
 6. **Drive the lab from `lab.yaml`** with `make plan` (Linux/macOS) or `.\scripts\make.ps1 plan` (Windows). See [docs/lab-yaml-schema.md](docs/lab-yaml-schema.md).
 7. **Cluster operations** (v2.0+): `python3 scripts/python/labctl.py migrate --vm X --target pve02 --execute` for live-migration; `ha-status` and `drill-ha-failover` for HA. See [docs/live-migration-runbook.md](docs/live-migration-runbook.md).
+8. **Roadmap in the issue tracker** - every item in [ROADMAP.md](ROADMAP.md) is mirrored as a GitHub Issue with the `roadmap` label, plus a `phase/vN.M` label, so filtering by phase (e.g. `is:open label:phase/v2.1`) gives you the backlog for that milestone. Re-run `scripts/seed-roadmap-issues.sh --close-done` to re-sync after a tick.
 
 ---
 
