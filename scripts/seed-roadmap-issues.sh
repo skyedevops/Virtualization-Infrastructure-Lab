@@ -146,29 +146,41 @@ open_issue "v2.0" "p1" "done" \
   "Implemented in commit \`d39af20\`.  Companion doc to scripts/bash/pve-{ha-status,live-migrate}.sh."
 
 # --- v2.1 (Proxmox Backup Server) ----------------------------------------
-open_issue "v2.1" "p0" "planned" \
+open_issue "v2.1" "p0" "done" \
   "[v2.1] Dedicated PBS VM on NAS or separate mini-PC" \
   "Provision a Proxmox Backup Server VM (or bare-metal mini-PC) for
 deduplicated, encrypted, incremental-forever backups of every PVE
-node.  Storage on the existing Synology NAS (NFS export, dedup pool)."
+node.  Storage on the existing Synology NAS (NFS export, dedup pool).
+Implemented in commit \`c815138\` (docs/pbs-decision.md) and \`edcebea\`
+(labctl PBS data model + subcommands).  PBS-on-NAS chosen over
+mini-PC (overkill) and on-cluster (chicken-and-egg)."
 
-open_issue "v2.1" "p1" "planned" \
+open_issue "v2.1" "p1" "done" \
   "[v2.1] PBS datastore add on each PVE node" \
   "Once PBS is up, register the datastore on pve01/02/03 via
-\`pvesm add pbs <name> --host <pbs> --datastore <name> --username backup@pbs\`.
-Make it the default backup target in /etc/pve/jobs.cfg."
+\`labctl pbs-init --execute\`.  The init brings up the datastore
+directory tree, runs \`proxmox-backup-manager datastore create\`, and
+configures the per-datastore prune job.  Implemented in commit
+\`edcebea\` and \`c0c9d87\` (docs/pbs-setup.md)."
 
-open_issue "v2.1" "p0" "planned" \
+open_issue "v2.1" "p0" "done" \
   "[v2.1] Backup jobs with deduplicated, encrypted, incremental-forever snapshots" \
   "Daily vzdump jobs per VM, prune policy: keep-last=3, keep-daily=7,
-keep-weekly=4.  Encryption key in the local keyring (NOT in the
-repo).  Verify the dedup ratio in the PBS UI after the first week."
+keep-weekly=4.  Declared in lab.yaml's \`backup_jobs:\` array and
+emitted as \`proxmox-backup-manager backup\` + \`prune\` + \`job create\`
+triples on the source PVE.  Implemented in commit \`edcebea\` and the
+bash runbook \`scripts/bash/pbs-backup.sh\` from commit \`29431c6\`."
 
-open_issue "v2.1" "p1" "planned" \
+open_issue "v2.1" "p1" "done" \
   "[v2.1] restore-test job that pulls a random backup nightly and boots it in an isolated VLAN" \
-  "Cron job on PBS host: pick a random VM from the last 7 days, qmrestore
-into a 'restore-test' pool with a -test- prefix and a dedicated VLAN.
-Boot it, smoke-test (ping + ssh + the app's healthcheck), tear down.
+  "Cron job on the PVE host: pick a random VM from the last 7 days,
+qmrestore into a \`restore-test-\` VM on \`vmbr1\` (isolated VLAN),
+boot, wait for QEMU guest agent, optional smoke-test, tear down in
+EXIT trap.  Implemented in \`scripts/bash/pbs-restore-test.sh\`
+(commit \`29431c6\`) and the labctl wrapper \`pbs-restore-test\`
+(commit \`edcebea\`).  Companion doc \`docs/pbs-restore-test.md\`
+(commit \`c0c9d87\`).  9/9 integration tests pass in
+\`tests/integration/test_pbs_backup.py\`.
 Failures alert to Discord via Alertmanager."
 
 # --- v2.2 (Observability Stack) ------------------------------------------
