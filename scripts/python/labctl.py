@@ -30,6 +30,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
+import shlex
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -256,6 +259,214 @@ def gen_plan(vms: list[VM], hvs: list[Hypervisor], nets: list[Network],
     return out
 
 
+def gen_create_commands(vm: VM, hv: Hypervisor, nets: dict[str, Network]) -> list[str]:
+    """Return the per-hypervisor shell commands that provision this VM.
+
+    These are the actual commands to run over the transport, not the
+    pretty-printed 'plan' output.
+    """
+    net = nets[vm.network]
+    if hv.type == "proxmox":
+        bridge = hv.extras.get("default_bridge", "vmbr0")
+        storage = hv.extras.get("default_storage", "local-lvm")
+        iso_storage = hv.extras.get("iso_storage", "local")
+        cmds = [
+            f"qm create {vm.vmid} --name {vm.name} --memory {vm.memory_mb} --cores {vm.cpu} "
+            f"--net0 virtio,bridge={bridge},tag={net.vlan_id} "
+            f"--scsi0 {storage}:{vm.disk_gb} --scsihw virtio-scsi-single "
+            f"--ostype l26 --agent enabled=1",
+        ]
+        if vm.iso:
+            cmds += [
+                f"qm set {vm.vmid} --ide2 {iso_storage}:iso/{vm.iso},media=cdrom",
+                f"qm set {vm.vmid} --boot order=ide2",
+            ]
+        if vm.onboot:
+            cmds.append(f"qm set {vm.vmid} --onboot 1")
+        return cmds
+
+    if hv.type == "hyperv":
+        switch = hv.extras.get("default_switch", "vSwitch-Internal")
+        vm_path = hv.extras.get("default_vm_path", "D:\\VMs")
+        vhd_path = hv.extras.get("default_vhd_path", "D:\\VMs\\Virtual Hard Disks")
+        vhdx = f"{vhd_path}\\{vm.name}\\{vm.name}.vhdx"
+        # These are PowerShell; the HyperVTransport wraps them in pwsh -Command
+        ps = [
+            "$ErrorActionPreference='Stop';",
+            f"New-Item -ItemType Directory -Path '{vhd_path}\\{vm.name}' -Force | Out-Null;",
+            f"New-VM -Name '{vm.name}' -Generation 2 "
+            f"-MemoryStartupBytes {vm.memory_mb * 1024 * 1024} "
+            f"-Path '{vm_path}' "
+            f"-NewVHDPath '{vhdx}' "
+            f"-NewVHDSizeBytes {vm.disk_gb * 1024 * 1024 * 1024} "
+            f"-SwitchName '{switch}';",
+            f"Set-VMProcessor -VMName '{vm.name}' -Count {vm.cpu};",
+        ]
+        if vm.iso:
+            ps.append(f"Add-VMDvdDrive -VMName '{vm.name}' -Path 'D:\\ISOs\\{vm.iso}';")
+        if net.vlan_id:
+            ps.append(f"Set-VMNetworkAdapterVlan -VMName '{vm.name}' -Access -VlanId {net.vlan_id};")
+        return ps
+
+    return []
+
+
+# =============================================================================
+# Transport layer
+# =============================================================================
+@dataclass
+class CommandResult:
+    host: str
+    cmd: str
+    returncode: int
+    stdout: str
+    stderr: str
+
+    @property
+    def ok(self) -> bool:
+        return self.returncode == 0
+
+
+class Transport:
+    """Base class for hypervisor transports."""
+
+    def name(self) -> str:
+        raise NotImplementedError
+
+    def run(self, hv: Hypervisor, command: str) -> CommandResult:
+        raise NotImplementedError
+
+
+class SshTransport(Transport):
+    """Subprocess + ssh. No third-party Python deps."""
+
+    def name(self) -> str:
+        return "ssh"
+
+    def run(self, hv: Hypervisor, command: str) -> CommandResult:
+        ssh_user = hv.extras.get("ssh_user", "root")
+        ssh_key = hv.extras.get("ssh_key")
+        port = str(hv.extras.get("ssh_port", "22"))
+        opts = hv.extras.get("ssh_options", "")
+
+        ssh_args = [
+            "ssh",
+            "-p", port,
+            "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=10",
+        ]
+        if ssh_key:
+            ssh_args += ["-i", os.fspath(Path(ssh_key).expanduser())]
+        if opts:
+            ssh_args += shlex.split(opts)
+        ssh_args += [f"{ssh_user}@{hv.host}", "--", command]
+
+        try:
+            cp = subprocess.run(
+                ssh_args,
+                capture_output=True,
+                text=True,
+                timeout=hv.extras.get("timeout", 60),
+            )
+            return CommandResult(
+                host=hv.host,
+                cmd=command,
+                returncode=cp.returncode,
+                stdout=cp.stdout,
+                stderr=cp.stderr,
+            )
+        except FileNotFoundError:
+            return CommandResult(hv.host, command, 127, "", "ssh: command not found on PATH")
+        except subprocess.TimeoutExpired:
+            return CommandResult(hv.host, command, 124, "", "ssh: timeout")
+        except Exception as e:  # pragma: no cover
+            return CommandResult(hv.host, command, 1, "", f"ssh: {e}")
+
+
+class LocalTransport(Transport):
+    """Run commands locally - used for 'apply' on the same host as the runner
+    (e.g. workstation running Proxmox in a nested setup) and for testing."""
+
+    def name(self) -> str:
+        return "local"
+
+    def run(self, hv: Hypervisor, command: str) -> CommandResult:
+        try:
+            cp = subprocess.run(
+                command, shell=True,
+                capture_output=True, text=True, timeout=hv.extras.get("timeout", 60),
+            )
+            return CommandResult(hv.host, command, cp.returncode, cp.stdout, cp.stderr)
+        except subprocess.TimeoutExpired:
+            return CommandResult(hv.host, command, 124, "", "local: timeout")
+        except Exception as e:  # pragma: no cover
+            return CommandResult(hv.host, command, 1, "", f"local: {e}")
+
+
+class HyperVTransport(Transport):
+    """Run PowerShell on the Hyper-V host. Uses 'pwsh -Command'.
+
+    If `win_user` is set, uses PowerShell Remoting (WinRM) via
+    Invoke-Command; otherwise runs locally on the runner (when the
+    runner is co-located with the Hyper-V host).
+    """
+
+    def name(self) -> str:
+        return "hyperv-pwsh"
+
+    def run(self, hv: Hypervisor, command: str) -> CommandResult:
+        win_user = hv.extras.get("win_user")
+        use_remoting = bool(win_user)
+
+        # Wrap the user's PowerShell snippet (which already sets
+        # $ErrorActionPreference and uses ;-separated statements) in
+        # either a local pwsh call or a WinRM Invoke-Command call.
+        if use_remoting:
+            ps = (
+                f"Invoke-Command -ComputerName {shlex.quote(hv.host)} "
+                f"-ErrorAction Stop -ScriptBlock {{ {command} }}"
+            )
+        else:
+            ps = command
+
+        pwsh = hv.extras.get("pwsh_path", "pwsh")
+        try:
+            cp = subprocess.run(
+                [pwsh, "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True, text=True,
+                timeout=hv.extras.get("timeout", 60),
+            )
+            return CommandResult(hv.host, command, cp.returncode, cp.stdout, cp.stderr)
+        except FileNotFoundError:
+            return CommandResult(hv.host, command, 127, "", f"{pwsh}: command not found on PATH")
+        except subprocess.TimeoutExpired:
+            return CommandResult(hv.host, command, 124, "", "pwsh: timeout")
+        except Exception as e:  # pragma: no cover
+            return CommandResult(hv.host, command, 1, "", f"pwsh: {e}")
+
+
+def make_transport(hv: Hypervisor) -> Transport:
+    """Pick the right transport based on the hypervisor config.
+
+    If `transport: ssh` is set, use SSH.
+    If `transport: local` is set, run commands on this machine (no SSH).
+    If `transport: hyperv` is set, use pwsh (local or WinRM).
+    If unset: defaults to ssh for proxmox, hyperv for hyperv.
+    """
+    choice = hv.extras.get("transport")
+    if choice is None:
+        choice = "hyperv" if hv.type == "hyperv" else "ssh"
+    choice = choice.lower()
+    if choice == "ssh":
+        return SshTransport()
+    if choice == "local":
+        return LocalTransport()
+    if choice == "hyperv":
+        return HyperVTransport()
+    raise LabError(f"Unknown transport '{choice}' for hypervisor {hv.name}")
+
+
 # =============================================================================
 # Subcommand implementations
 # =============================================================================
@@ -294,10 +505,86 @@ def cmd_plan(args, _) -> int:
 
 
 def cmd_apply(args, _) -> int:
-    # Dry-run only in v1.4 - we don't want to actually create VMs from CI.
-    # Future: dispatch the commands from gen_plan() to the right hypervisor.
-    print("[WARN] `apply` is dry-run only in v1.4.  Use `plan` to preview.", file=sys.stderr)
-    return cmd_plan(args, _)
+    """Actually provision VMs in the lab.
+
+    Safety:
+      - Always prints the plan first.
+      - Refuses to run unless --execute is passed AND --yes is passed.
+      - Stops on the first failure unless --keep-going.
+    """
+    data, nets, hvs, vms = load_lab(args.lab)
+    errs = validate(data, nets, hvs, vms)
+    if errs:
+        print("[FAIL] validation errors:", file=sys.stderr)
+        for e in errs:
+            print(f"  - {e}", file=sys.stderr)
+        return 1
+
+    net_idx = {n.name: n for n in nets}
+    hv_idx = {h.name: h for h in hvs}
+
+    targets = [v for v in vms if not args.hypervisor or v.hypervisor == args.hypervisor]
+    targets.sort(key=lambda v: (v.hypervisor, v.start_order, v.name))
+
+    print(f"# Apply plan: {len(targets)} VM(s)")
+    plan = gen_plan(vms, hvs, nets, args.hypervisor)
+    for line in plan:
+        print(line)
+
+    if not args.execute:
+        print("[--] dry-run (no changes). Pass --execute --yes to apply.", file=sys.stderr)
+        return 0
+
+    if not args.yes:
+        try:
+            ans = input("Apply these changes? [y/N] ").strip().lower()
+        except EOFError:
+            ans = "n"
+        if ans not in ("y", "yes"):
+            print("Aborted.")
+            return 1
+
+    # Execute
+    failed = 0
+    for vm in targets:
+        hv = hv_idx.get(vm.hypervisor)
+        if hv is None:
+            print(f"[SKIP] {vm.key} - no hypervisor definition")
+            continue
+        try:
+            cmds = gen_create_commands(vm, hv, net_idx)
+        except Exception as e:
+            print(f"[FAIL] {vm.key} - command generation error: {e}")
+            failed += 1
+            if not args.keep_going:
+                break
+            continue
+
+        if not cmds:
+            print(f"[SKIP] {vm.key} - no commands for hypervisor type '{hv.type}'")
+            continue
+
+        transport = make_transport(hv)
+        print(f"\n>>> {vm.key}  (transport={transport.name()})")
+        for cmd in cmds:
+            print(f"  $ {cmd[:200]}{'...' if len(cmd) > 200 else ''}")
+            result = transport.run(hv, cmd)
+            if result.stderr.strip():
+                print(f"    stderr: {result.stderr.strip()[:500]}")
+            if not result.ok:
+                print(f"  [FAIL] rc={result.returncode}")
+                failed += 1
+                if not args.keep_going:
+                    print("[ABORT] stopping on first failure (use --keep-going to continue)")
+                    return 1
+            else:
+                print("  [OK]")
+
+    if failed:
+        print(f"\n[FAIL] {failed} command(s) failed.")
+        return 1
+    print("\n[OK] apply complete.")
+    return 0
 
 
 def cmd_inventory(args, _) -> int:
@@ -386,8 +673,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--hypervisor", help="Filter to a single hypervisor")
     sp.set_defaults(func=cmd_plan)
 
-    sp = sub.add_parser("apply", help="Create/update VMs in the lab (dry-run in v1.4)")
+    sp = sub.add_parser("apply", help="Create VMs in the lab (dry-run by default; --execute to apply)")
     sp.add_argument("--hypervisor", help="Filter to a single hypervisor")
+    sp.add_argument("--execute", action="store_true",
+                    help="Actually run the commands (default: dry-run)")
+    sp.add_argument("--yes", action="store_true",
+                    help="Skip the confirmation prompt")
+    sp.add_argument("--keep-going", action="store_true",
+                    help="Continue on command failure")
     sp.set_defaults(func=cmd_apply)
 
     sub.add_parser("inventory", help="Print current state of all VMs").set_defaults(func=cmd_inventory)
