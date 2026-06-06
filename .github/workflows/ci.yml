@@ -26,6 +26,7 @@ jobs:
           - hypervisors/proxmox-ve/scripts/backup-all-vms.sh
           - scripts/bash/vm-inventory.sh
           - scripts/bash/lab-health.sh
+          - scripts/bootstrap/bootstrap.sh
           - virtual-machines/linux/scripts/linux-vm-postinstall.sh
     steps:
       - uses: actions/checkout@v4
@@ -101,6 +102,7 @@ jobs:
           - hypervisors/hyper-v/scripts/Restore-VMFromExport.ps1
           - scripts/powershell/Get-LabInventory.ps1
           - scripts/powershell/Invoke-LabPowerControl.ps1
+          - scripts/bootstrap/bootstrap.ps1
           - virtual-machines/windows/scripts/windows-vm-postinstall.ps1
     steps:
       - uses: actions/checkout@v4

@@ -96,7 +96,7 @@ foreach ($vm in $vms) {
             Rename-Item -Path (Join-Path $ExportPath $name) -NewName (Split-Path $dest -Leaf)
             Log "Export complete."
         } catch {
-            Log "ERROR exporting $name: $_"
+            Log "ERROR exporting ${name}: $_"
         }
 
         # Trim old exports - keep last 4 weeks
