@@ -1,0 +1,89 @@
+lab:
+  name: fake-cluster
+  description: 2-node fake-pve cluster for the labctl integration test.
+
+networks:
+  servers:
+    vlan_id: 20
+    subnet: 10.10.20.0/24
+    gateway: 10.10.20.1
+    dhcp: false
+
+hypervisors:
+  pve01:
+    type: proxmox
+    host: 127.0.0.1
+    ssh_port_pve01: 22001
+    ssh_user: root
+    ssh_key: /workspaces/Virtualization-Infrastructure-Lab/lab-test/fixtures/id_ed25519
+    ssh_options: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    transport: ssh
+    default_bridge: vmbr0
+    default_storage: ceph-rbd
+    iso_storage: nfs-iso
+  pve02:
+    type: proxmox
+    host: 127.0.0.1
+    ssh_port_pve02: 22002
+    ssh_user: root
+    ssh_key: /workspaces/Virtualization-Infrastructure-Lab/lab-test/fixtures/id_ed25519
+    ssh_options: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    transport: ssh
+    default_bridge: vmbr0
+    default_storage: ceph-rbd
+    iso_storage: nfs-iso
+
+clusters:
+  prod:
+    type: proxmox
+    hypervisors: [pve01, pve02]
+    storage:
+      - id: ceph-rbd
+        type: rbd
+        pool: vm-disks
+        content: images,rootdir
+      - id: nfs-iso
+        type: nfs
+        server: 10.10.20.5
+        export: /volume1/iso
+        content: iso,vztmpl
+    ha_groups:
+      default:
+        nodes: [pve01, pve02]
+        restricted: false
+        nofailback: false
+      tier1:
+        nodes: [pve01, pve02]
+        restricted: false
+        nofailback: true
+
+vms:
+  - name: web01
+    hypervisor: pve01
+    vmid: 1001
+    role: web
+    network: servers
+    cpu: 2
+    memory_mb: 1024
+    disk_gb: 20
+    start_order: 30
+    onboot: true
+    storage: ceph-rbd
+    ha: true
+    ha_group: default
+    notes: 1st VM, lands on pve01.
+
+  - name: db01
+    hypervisor: pve01
+    vmid: 1002
+    role: database
+    network: servers
+    cpu: 2
+    memory_mb: 2048
+    disk_gb: 50
+    start_order: 20
+    onboot: true
+    storage: ceph-rbd
+    ha: true
+    ha_group: tier1
+    notes: Critical VM, lives on pve01 but HA'd to pve02 if it dies.

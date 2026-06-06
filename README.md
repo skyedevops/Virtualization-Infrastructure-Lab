@@ -16,6 +16,7 @@ This lab was built to gain practical, production-grade experience with the major
 - Snapshot management, scheduled backups, and bare-metal recovery procedures
 - Resource allocation, performance tuning, and capacity planning
 - Automation with PowerShell, Bash, and the Proxmox API
+- Multi-host Proxmox cluster operations: shared storage, live-migration, and HA failover drills
 
 ---
 
@@ -25,7 +26,7 @@ This lab was built to gain practical, production-grade experience with the major
 |------------|------|---------|------------------|
 | **VMware Workstation Pro 17** | Type-2 | Windows 11 | Desktop lab, nested labs, OS testing |
 | **Microsoft Hyper-V** | Type-1 | Windows Server 2022 | Windows-centric production-style lab |
-| **Proxmox VE 8.x** | Type-1 | Debian 12 (bare metal) | Open-source datacenter, clustering, KVM/LXC |
+| **Proxmox VE 8.x (3-node cluster)** | Type-1 | Debian 12 (bare metal) | Open-source datacenter, clustering, HA, live-migration |
 | **Oracle VirtualBox 7** | Type-2 | Linux & Windows | Cross-platform dev/test, Vagrant integration |
 
 ---
@@ -98,6 +99,7 @@ See [docs/lab-topology.md](docs/lab-topology.md) for the full network and storag
 4. Implement networking from `networking/README.md`.
 5. Establish your snapshot and backup baseline from `snapshots-backup/README.md`.
 6. **Drive the lab from `lab.yaml`** with `make plan` (Linux/macOS) or `.\scripts\make.ps1 plan` (Windows). See [docs/lab-yaml-schema.md](docs/lab-yaml-schema.md).
+7. **Cluster operations** (v2.0+): `python3 scripts/python/labctl.py migrate --vm X --target pve02 --execute` for live-migration; `ha-status` and `drill-ha-failover` for HA. See [docs/live-migration-runbook.md](docs/live-migration-runbook.md).
 
 ---
 

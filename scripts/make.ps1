@@ -9,13 +9,19 @@
 .EXAMPLE
     .\scripts\make.ps1 plan
     .\scripts\make.ps1 -Target drill -VM web01
+    .\scripts\make.ps1 -Target migrate -VM pfsense -TargetNode pve02
+    .\scripts\make.ps1 -Target ha-drill -Node pve01
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Position=0)] [ValidateSet('help','validate','plan','apply','inventory','start','stop','backup','drill','clean')]
+    [Parameter(Position=0)] [ValidateSet(
+        'help','validate','plan','apply','inventory','start','stop',
+        'backup','drill','migrate','ha-status','ha-drill','clean')]
     [string] $Target = 'help',
     [string] $Lab = 'lab.yaml',
     [string] $VM,
+    [string] $TargetNode,
+    [string] $Node,
     [string] $Python = 'python'
 )
 
@@ -34,10 +40,24 @@ switch ($Target) {
         if (-not $VM) { throw "drill requires -VM. Example: .\make.ps1 drill -VM web01" }
         $pyArgs += @('drill', '--vm', $VM)
     }
+    'migrate' {
+        if (-not $VM -or -not $TargetNode) {
+            throw "migrate requires -VM and -TargetNode. Example: .\make.ps1 migrate -VM pfsense -TargetNode pve02"
+        }
+        $pyArgs += @('migrate', '--vm', $VM, '--target', $TargetNode, '--execute')
+    }
+    'ha-drill' {
+        if (-not $Node) {
+            throw "ha-drill requires -Node. Example: .\make.ps1 ha-drill -Node pve01"
+        }
+        $pyArgs += @('drill-ha-failover', '--node', $Node, '--execute', '--yes')
+    }
     'help' {
-        Write-Host "Targets: validate, plan, apply, inventory, start, stop, backup, drill, clean" -ForegroundColor Cyan
+        Write-Host "Targets: validate, plan, apply, inventory, start, stop, backup, drill, migrate, ha-status, ha-drill, clean" -ForegroundColor Cyan
         Write-Host "Example:  .\make.ps1 plan"
         Write-Host "          .\make.ps1 drill -VM web01"
+        Write-Host "          .\make.ps1 migrate -VM pfsense -TargetNode pve02"
+        Write-Host "          .\make.ps1 ha-drill -Node pve01"
         return
     }
     default { $pyArgs += $Target }

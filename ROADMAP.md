@@ -15,7 +15,7 @@ between lists as work progresses.
 | **v1.3 - Diagrams** | Complete | this commit |
 | **v1.4 - Lab-in-a-Box Bootstrap** | Complete | this commit |
 | **v1.5 - CI for the Scripts** | Complete | this commit |
-| **v2.0 - Multi-Host Proxmox Cluster** | Planned | - |
+| **v2.0 - Multi-Host Proxmox Cluster** | In progress | this commit |
 | **v2.1 - Proxmox Backup Server** | Planned | - |
 | **v2.2 - Observability Stack** | Planned | - |
 | **v2.3 - IaC with Terraform + Ansible** | Planned | - |
@@ -60,9 +60,18 @@ New infrastructure, same repo conventions.
 
 ### v2.0 - Multi-Host Proxmox Cluster
 - [ ] Stand up a 3-node Proxmox cluster (current node + 2 added)
-- [ ] Document Ceph vs NFS shared storage choice with cost/perf trade-off
-- [ ] HA tests: `ha-manager` + simulated node failure
-- [ ] Live-migration demo + runbook entry
+- [x] Document Ceph vs NFS shared storage choice with cost/perf trade-off
+      (`docs/cluster-storage-decision.md`)
+- [x] Extend `labctl.py` for multi-host clusters: `Cluster` / `Storage` /
+      `HAGroup` dataclasses, `clusters:` block in `lab.yaml`, per-VM
+      `storage:` / `ha:` / `ha_group:` fields
+- [x] `labctl migrate` / `ha-status` / `drill-ha-failover` subcommands
+- [x] Standalone runbooks: `scripts/bash/pve-ha-status.sh` and
+      `scripts/bash/pve-live-migrate.sh`
+- [x] Multi-host integration test
+      (`tests/integration/test_cluster_lifecycle.py`, 7 cases; spins
+      up a 2-node fake-pve cluster)
+- [x] `docs/live-migration-runbook.md` - planned/HA/drill scenarios
 
 ### v2.1 - Proxmox Backup Server (PBS)
 - [ ] Dedicated PBS VM on NAS or separate mini-PC

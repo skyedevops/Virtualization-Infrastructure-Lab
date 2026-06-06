@@ -12,7 +12,7 @@ SHELL     := /usr/bin/env bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-.PHONY: help validate plan apply inventory start stop backup drill clean
+.PHONY: help validate plan apply inventory start stop backup drill migrate ha-status ha-drill clean
 
 help:                   ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -41,6 +41,17 @@ backup:                 ## Show the backup commands
 drill:                  ## Walk the DR runbook for one VM
 	@test -n "$(VM)" || (echo "VM= required, e.g. make drill VM=web01" >&2; exit 2)
 	$(PY) $(LABCTL) --lab $(LAB) drill --vm $(VM)
+
+migrate:                ## Live-migrate a VM to another node (v2.0)
+	@test -n "$(VM)" -a -n "$(TARGET)" || (echo "VM= and TARGET= required" >&2; exit 2)
+	$(PY) $(LABCTL) --lab $(LAB) migrate --vm $(VM) --target $(TARGET) --execute
+
+ha-status:              ## Show Proxmox HA status for every cluster (v2.0)
+	$(PY) $(LABCTL) --lab $(LAB) ha-status
+
+ha-drill:               ## Fence/unfence a node to drill HA failover (v2.0)
+	@test -n "$(NODE)" || (echo "NODE= required" >&2; exit 2)
+	$(PY) $(LABCTL) --lab $(LAB) drill-ha-failover --node $(NODE) --execute --yes
 
 clean:                  ## Remove transient plan output
 	rm -rf .lab-plan/

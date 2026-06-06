@@ -654,7 +654,8 @@ def cmd_validate(args, _) -> int:
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
-    print(f"[OK] lab.yaml is valid: {len(vms)} VMs across {len(hvs)} hypervisor(s)")
+    print(f"[OK] lab.yaml is valid: {len(vms)} VMs across {len(hvs)} hypervisor(s)"
+          + (f", {len(clusters)} cluster(s)" if clusters else ""))
     return 0
 
 
@@ -832,6 +833,190 @@ def cmd_drill(args, _) -> int:
 
 
 # =============================================================================
+# v2.0 cluster subcommands
+# =============================================================================
+def _find_cluster_for(hv_name: str, clusters: list[Cluster]) -> Cluster | None:
+    for c in clusters:
+        if hv_name in c.hypervisors:
+            return c
+    return None
+
+
+def _find_hv(name: str, hvs: list[Hypervisor]) -> Hypervisor | None:
+    for h in hvs:
+        if h.name == name:
+            return h
+    return None
+
+
+def _run_on(hv: Hypervisor, command: str) -> CommandResult:
+    return make_transport(hv).run(hv, command)
+
+
+def cmd_migrate(args, _) -> int:
+    """Live-migrate a VM to another node in its Proxmox cluster.
+
+    Dry-run by default; pass --execute to actually migrate.
+    """
+    try:
+        data, nets, hvs, vms, clusters = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+
+    vm = next((v for v in vms if v.name == args.vm), None)
+    if vm is None:
+        print(f"[FAIL] unknown VM '{args.vm}'", file=sys.stderr)
+        return 1
+    src_hv = _find_hv(vm.hypervisor, hvs)
+    if src_hv is None or src_hv.type != "proxmox":
+        print(f"[FAIL] VM '{args.vm}' is not on a Proxmox hypervisor", file=sys.stderr)
+        return 1
+    cluster = _find_cluster_for(src_hv.name, clusters)
+    if cluster is None:
+        print(f"[FAIL] hypervisor '{src_hv.name}' is not in any cluster", file=sys.stderr)
+        return 1
+    if args.target not in cluster.hypervisors:
+        print(f"[FAIL] target '{args.target}' not in cluster '{cluster.name}'", file=sys.stderr)
+        return 1
+    if args.target == src_hv.name:
+        print(f"[FAIL] target == source ({src_hv.name}); nothing to do", file=sys.stderr)
+        return 1
+
+    mode = args.mode or "online"
+    cmd = f"qm migrate {vm.vmid} {args.target} {mode}"
+    print("# Migration plan:")
+    print(f"#   VM        : {vm.name} (vmid={vm.vmid})")
+    print(f"#   source    : {src_hv.name} ({src_hv.host})")
+    print(f"#   target    : {args.target}")
+    print(f"#   mode      : {mode}")
+    print(f"#   cluster   : {cluster.name}")
+    print(f"#   command   : {cmd}")
+    if not args.execute:
+        print("[--] dry-run. Pass --execute to migrate.", file=sys.stderr)
+        return 0
+    print(f"[..] running: {cmd}")
+    res = _run_on(src_hv, cmd)
+    if res.stdout:
+        print(res.stdout, end="")
+    if res.stderr:
+        print(res.stderr, end="", file=sys.stderr)
+    if res.returncode != 0:
+        print(f"[FAIL] qm migrate exited with {res.returncode}", file=sys.stderr)
+        return 1
+    print(f"[OK] {vm.name} migrated {src_hv.name} -> {args.target}")
+    return 0
+
+
+def cmd_ha_status(args, _) -> int:
+    """Show HA status for every Proxmox cluster in the lab."""
+    try:
+        data, nets, hvs, vms, clusters = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    if not clusters:
+        print("[INFO] no clusters defined in lab.yaml", file=sys.stderr)
+        return 0
+    rc = 0
+    for cluster in clusters:
+        print(f"# Cluster: {cluster.name}  ({len(cluster.hypervisors)} nodes, "
+              f"{len(cluster.storage)} storage pools, {len(cluster.ha_groups)} HA groups)")
+        # Pick a single node to query (the first one).  In real life we'd
+        # hit every node and merge; for now one query is representative.
+        first = _find_hv(cluster.hypervisors[0], hvs)
+        if first is None or first.type != "proxmox":
+            print(f"  [SKIP] no proxmox hypervisor for {cluster.hypervisors[0]}")
+            continue
+        res = _run_on(first, "ha-manager status")
+        if res.returncode != 0:
+            print(f"  [FAIL] ha-manager status returned {res.returncode}", file=sys.stderr)
+            rc = 1
+            continue
+        for line in res.stdout.splitlines():
+            line = line.rstrip()
+            if not line:
+                continue
+            print(f"  {line}")
+        # HA groups
+        print(f"  # HA groups: {', '.join(cluster.ha_groups.keys())}")
+    return rc
+
+
+def cmd_drill_ha_failover(args, _) -> int:
+    """Simulate a node failure by fencing it via ha-manager.
+
+    Always prompt for confirmation unless --yes is given.  The drill
+    is destructive: VMs on the fenced node become "fenced" in the
+    real Proxmox HA manager and are live-migrated to a surviving
+    node.  Use --unfence to restore the original state.
+    """
+    try:
+        data, nets, hvs, vms, clusters = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    if not args.node:
+        print("--node required for drill-ha-failover", file=sys.stderr)
+        return 2
+    cluster = None
+    for c in clusters:
+        if args.node in c.hypervisors:
+            cluster = c
+            break
+    if cluster is None:
+        print(f"[FAIL] node '{args.node}' not in any cluster", file=sys.stderr)
+        return 1
+    hv = _find_hv(args.node, hvs)
+    if hv is None or hv.type != "proxmox":
+        print(f"[FAIL] '{args.node}' is not a Proxmox hypervisor", file=sys.stderr)
+        return 1
+    # Pick a surviving node to query status from.
+    survivors = [n for n in cluster.hypervisors if n != args.node]
+    if not survivors:
+        print(f"[FAIL] no surviving node in cluster '{cluster.name}'", file=sys.stderr)
+        return 1
+    survivor_hv = _find_hv(survivors[0], hvs)
+    action = "unfence" if args.unfence else "fence"
+    cmd = f"ha-manager {action} {args.node}"
+    print(f"# HA failover drill ({action})")
+    print(f"#   cluster : {cluster.name}")
+    print(f"#   target  : {args.node} ({hv.host})")
+    print(f"#   witness : {survivors[0]} ({survivor_hv.host})")
+    print(f"#   command : {cmd}")
+    if not args.execute:
+        print(f"[--] dry-run. Pass --execute to run '{cmd}'.",
+              file=sys.stderr)
+        return 0
+    if not args.yes:
+        try:
+            ans = input(f"Run 'ha-manager {action} {args.node}'? [y/N] ").strip().lower()
+        except EOFError:
+            ans = "n"
+        if ans not in ("y", "yes"):
+            print("Aborted.")
+            return 1
+    # Run the fence/unfence on the witness node (real Proxmox has the
+    # master coordinate HA, so we hit any cluster member).
+    res = _run_on(survivor_hv, cmd)
+    if res.returncode != 0:
+        print(f"[FAIL] ha-manager {action} returned {res.returncode}", file=sys.stderr)
+        if res.stderr:
+            print(res.stderr, end="", file=sys.stderr)
+        return 1
+    # Query the resulting status from the witness.
+    print(f"[..] {action} OK; status from {survivors[0]}:")
+    status = _run_on(survivor_hv, "ha-manager status")
+    if status.stdout:
+        for line in status.stdout.splitlines():
+            if line.strip():
+                print(f"  {line.rstrip()}")
+    print(f"[OK] HA {action} of {args.node} complete. "
+          f"Run scripts/bash/pve-ha-status.sh on {survivors[0]} to confirm.")
+    return 0
+
+
+# =============================================================================
 # Argument parsing
 # =============================================================================
 def build_parser() -> argparse.ArgumentParser:
@@ -869,9 +1054,31 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("backup", help="Show the backup commands for this lab").set_defaults(func=cmd_backup)
 
-    sp = sub.add_parser("drill", help="Walk a DR drill for one VM")
+    sp =     sub.add_parser("drill", help="Walk a DR drill for one VM")
     sp.add_argument("--vm", required=True, help="VM name")
     sp.set_defaults(func=cmd_drill)
+
+    sp = sub.add_parser("migrate", help="Live-migrate a VM to another node in its cluster")
+    sp.add_argument("--vm", required=True, help="VM name to migrate")
+    sp.add_argument("--target", required=True, help="Target hypervisor name from lab.yaml")
+    sp.add_argument("--mode", choices=["online", "offline"], default="online",
+                    help="online = live; offline = stop+move (default: online)")
+    sp.add_argument("--execute", action="store_true",
+                    help="Actually run the migration (default: dry-run)")
+    sp.set_defaults(func=cmd_migrate)
+
+    sub.add_parser("ha-status", help="Show Proxmox HA status for every cluster").set_defaults(func=cmd_ha_status)
+
+    sp = sub.add_parser("drill-ha-failover",
+                        help="Fence/unfence a node to drill HA failover")
+    sp.add_argument("--node", required=True, help="Hypervisor to fence/unfence")
+    sp.add_argument("--unfence", action="store_true",
+                    help="Reverse a previous fence (ha-manager unfence)")
+    sp.add_argument("--execute", action="store_true",
+                    help="Actually run ha-manager fence/unfence (default: dry-run)")
+    sp.add_argument("--yes", action="store_true",
+                    help="Skip the confirmation prompt")
+    sp.set_defaults(func=cmd_drill_ha_failover)
 
     return p
 

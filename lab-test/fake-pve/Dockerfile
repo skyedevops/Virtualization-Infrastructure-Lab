@@ -52,6 +52,7 @@ RUN printf '%s\n' \
     rm /etc/ssh/sshd_config.test
 
 COPY qm /usr/local/bin/qm
+COPY ha-manager /usr/local/bin/ha-manager
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY authorized_keys /root/.ssh/authorized_keys
 
@@ -66,7 +67,7 @@ RUN printf '%s\n' \
         > /etc/lab-test.conf && \
     chmod 644 /etc/lab-test.conf
 
-RUN chmod +x /usr/local/bin/qm /usr/local/bin/entrypoint.sh && \
+RUN chmod +x /usr/local/bin/qm /usr/local/bin/ha-manager /usr/local/bin/entrypoint.sh && \
     chown -R root:root /root/.ssh && \
     chmod 600 /root/.ssh/authorized_keys && \
     echo 'fake-pve:0.1.0' > /etc/lab-release

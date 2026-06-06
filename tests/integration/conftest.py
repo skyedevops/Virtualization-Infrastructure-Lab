@@ -121,6 +121,7 @@ def fake_pve_container(docker_client: object, fake_pve_image: str) -> Iterator[d
         "host": "127.0.0.1",
         "port": port,
         "ssh_key": FIXTURE_KEY,
+        "node_name": "pve01",
     }
     try:
         if not _ssh_ready("127.0.0.1", port, FIXTURE_KEY, timeout=45):
@@ -134,6 +135,97 @@ def fake_pve_container(docker_client: object, fake_pve_image: str) -> Iterator[d
             container.remove(force=True)
         except Exception:
             pass
+
+
+# -----------------------------------------------------------------------------
+# v2.0 - multi-host cluster fixtures
+# -----------------------------------------------------------------------------
+CLUSTER_LAB = REPO_ROOT / "lab-test" / "fixtures" / "lab-cluster.yaml"
+
+
+def _start_fake_pve(docker_client, image_id: str, name: str, node: str) -> dict:
+    """Helper: run a fake-pve container with FAKE_NODE_NAME set so the
+    shim stamps VM records with the right cluster node name.
+    """
+    port = _free_port()
+    # Best-effort cleanup
+    try:
+        existing = docker_client.containers.get(name)  # type: ignore[attr-defined]
+        existing.remove(force=True)
+    except Exception:
+        pass
+    container = docker_client.containers.run(  # type: ignore[attr-defined]
+        image_id,
+        name=name,
+        detach=True,
+        auto_remove=False,
+        ports={"22/tcp": ("127.0.0.1", port)},
+        environment={"FAKE_NODE_NAME": node},
+    )
+    info = {
+        "container": container,
+        "host": "127.0.0.1",
+        "port": port,
+        "ssh_key": FIXTURE_KEY,
+        "node_name": node,
+    }
+    if not _ssh_ready("127.0.0.1", port, FIXTURE_KEY, timeout=45):
+        logs = container.logs(stdout=True, stderr=True).decode("utf-8", "ignore")
+        container.remove(force=True)
+        pytest.fail(f"sshd did not become ready on port {port}\n--- container logs ---\n{logs}")
+    time.sleep(0.3)
+    return info
+
+
+@pytest.fixture()
+def fake_pve_cluster(docker_client: object, fake_pve_image: str) -> Iterator[list[dict]]:
+    """Spin up a 2-node fake-pve cluster (pve01, pve02)."""
+    nodes = [
+        ("labctl-cluster-pve01", "pve01"),
+        ("labctl-cluster-pve02", "pve02"),
+    ]
+    started: list[dict] = []
+    try:
+        for cname, nname in nodes:
+            started.append(_start_fake_pve(docker_client, fake_pve_image, cname, nname))
+        yield started
+    finally:
+        for info in started:
+            try:
+                info["container"].remove(force=True)
+            except Exception:
+                pass
+
+
+@pytest.fixture()
+def rendered_cluster_lab(request, tmp_path: Path) -> Path:
+    """Materialise a 2-node cluster lab.yaml pointing at the running
+    fake_pve_cluster containers.
+
+    The fixture file uses two named placeholders that the test rewrites
+    to the actual host ports for each running container:
+
+        ssh_port_pve01: 22001   <-- rewritten to pve01's port
+        ssh_port_pve02: 22002   <-- rewritten to pve02's port
+
+    We then rename the placeholders to the real key the labctl SSH
+    transport reads (`ssh_port: <n>`).  Both placeholders are looked up
+    directly so we don't depend on the node-name suffix arithmetic.
+    """
+    cluster = request.getfixturevalue("fake_pve_cluster")
+    by_node = {n["node_name"]: n for n in cluster}
+    content = CLUSTER_LAB.read_text()
+    # Map of placeholder -> node name -> port
+    placeholders = {
+        "pve01": "ssh_port_pve01: 22001",
+        "pve02": "ssh_port_pve02: 22002",
+    }
+    for node_name, placeholder in placeholders.items():
+        info = by_node[node_name]
+        content = content.replace(placeholder, f"ssh_port: {info['port']}")
+    out = tmp_path / "lab.yaml"
+    out.write_text(content)
+    return out
 
 
 @pytest.fixture()

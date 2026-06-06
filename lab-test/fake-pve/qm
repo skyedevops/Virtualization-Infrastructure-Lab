@@ -12,6 +12,7 @@
 #   list     print a `qm list`-shaped table
 #   status   print one VM record
 #   destroy  remove a VM record
+#   migrate  relocate a VM to another node (updates node field)
 
 set -euo pipefail
 
@@ -21,8 +22,8 @@ if [[ -r /etc/lab-test.conf ]]; then
   set -a; source /etc/lab-test.conf; set +a
 fi
 
-LOG_DIR=/var/log/lab
-STATE_FILE=/var/lib/lab/state.json
+LOG_DIR="${LOG_DIR:-/var/log/lab}"
+STATE_FILE="${STATE_FILE:-/var/lib/lab/state.json}"
 mkdir -p "$LOG_DIR" "$(dirname "$STATE_FILE")"
 # Initialise state.json as a JSON object (not empty) so jq can do
 # `.vms += [...]` on it.  Idempotent: re-init only if missing or invalid.
@@ -83,9 +84,10 @@ case "$cmd" in
        --arg net "$net0" \
        --arg scsi "$scsi0" \
        --arg ostype "$ostype" \
-       '.vms += [{vmid:$vmid, name:$name, memory:$memory, cores:$cores, net:$net, scsi:$scsi, ostype:$ostype, status:"created"}]' \
+       --arg node "${FAKE_NODE_NAME:-pve01}" \
+       '.vms += [{vmid:$vmid, name:$name, memory:$memory, cores:$cores, net:$net, scsi:$scsi, ostype:$ostype, status:"created", node:$node}]' \
        "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
-    echo "created VM $vmid ($name)" >&2
+    echo "created VM $vmid ($name) on ${FAKE_NODE_NAME:-pve01}" >&2
     ;;
   set)
     vmid="${1:-}"; shift
@@ -108,6 +110,30 @@ case "$cmd" in
     echo "destroy: vmid=$vmid" >> "$LOG_DIR/qm.log"
     tmp=$(mktemp)
     jq --arg vmid "$vmid" '.vms |= map(select(.vmid != $vmid))' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    ;;
+  migrate)
+    # qm migrate <vmid> <target-node> [online|offline]
+    vmid="${1:-}"
+    target="${2:-}"
+    mode="${3:-online}"
+    echo "migrate: vmid=$vmid target=$target mode=$mode" >> "$LOG_DIR/qm.log"
+    [[ -z "$vmid" ]]  && { echo "qm migrate: missing vmid" >&2; exit 2; }
+    [[ -z "$target" ]] && { echo "qm migrate: missing target node" >&2; exit 2; }
+    # Optional fault injection: refuse to migrate specific VMIDs.
+    if [[ -n "${QM_FAIL_MIGRATE:-}" ]]; then
+      IFS=',' read -r -a fails <<< "$QM_FAIL_MIGRATE"
+      for f in "${fails[@]}"; do
+        if [[ "$f" == "$vmid" ]]; then
+          echo "simulated migrate failure for vmid=$vmid" >&2
+          exit 1
+        fi
+      done
+    fi
+    tmp=$(mktemp)
+    jq --arg vmid "$vmid" --arg target "$target" \
+       '(.vms[] | select(.vmid == $vmid) | .node) = $target' \
+       "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    echo "migrated VM $vmid -> $target" >&2
     ;;
   list)
     jq -r '.vms[]? | "\(.vmid) \(.name) \(.status) \(.memory) 0 \(.scsi)"' "$STATE_FILE" 2>/dev/null \
