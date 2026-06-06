@@ -32,6 +32,25 @@ hypervisors:
     default_storage: local-lvm
     iso_storage: local
 
+  # v2.0 - 3-node Proxmox cluster.  pve01 is the existing node; pve02
+  # and pve03 are the nodes added in step 7.  See
+  # docs/cluster-storage-decision.md for the design.
+  pve02:
+    type: proxmox
+    host: 10.10.10.21
+    ssh_user: root
+    default_bridge: vmbr0
+    default_storage: ceph-rbd
+    iso_storage: nfs-iso
+
+  pve03:
+    type: proxmox
+    host: 10.10.10.22
+    ssh_user: root
+    default_bridge: vmbr0
+    default_storage: ceph-rbd
+    iso_storage: nfs-iso
+
   hyperv01:
     type: hyperv
     host: 10.10.10.12
@@ -39,6 +58,44 @@ hypervisors:
     default_switch: vSwitch-Internal
     default_vm_path: "D:\\VMs"
     default_vhd_path: "D:\\VMs\\Virtual Hard Disks"
+
+# v2.0 - Proxmox cluster + shared storage + HA groups.  A VM's
+# `storage:` field references one of the IDs in `storage[]` here.
+# The decision on Ceph vs NFS is documented in
+# docs/cluster-storage-decision.md.
+clusters:
+  prod:
+    type: proxmox
+    hypervisors: [pve01, pve02, pve03]
+    storage:
+      - id: ceph-rbd
+        type: rbd
+        pool: vm-disks
+        content: images,rootdir
+      - id: nfs-iso
+        type: nfs
+        server: 10.10.20.5
+        export: /volume1/iso
+        content: iso,vztmpl
+      - id: nfs-vm
+        type: nfs
+        server: 10.10.20.5
+        export: /volume1/vm
+        content: images,rootdir
+      - id: nfs-backup
+        type: nfs
+        server: 10.10.20.5
+        export: /volume1/backup
+        content: backup
+    ha_groups:
+      default:
+        nodes: [pve01, pve02, pve03]
+        restricted: false
+        nofailback: false
+      tier1:                # critical VMs that must never be on pve03
+        nodes: [pve01, pve02]
+        restricted: true
+        nofailback: true
 
 # Network segments the runners can attach VMs to.
 # vlan_id 0  -> untagged / default bridge
@@ -86,6 +143,9 @@ vms:
     iso: pfSense-CE-2.7.2-RELEASE-amd64.iso
     start_order: 5
     onboot: true
+    storage: ceph-rbd       # v2.0 - replicated across the cluster
+    ha: true                # v2.0 - fail over if pve01 dies
+    ha_group: tier1         # v2.0 - never land on pve03
     notes: |
       Edge firewall + router. WAN on vmbr0 (home router uplink),
       LAN trunk on vmbr0 carrying all five VLANs.
@@ -135,6 +195,8 @@ vms:
     start_order: 30
     onboot: false
     post_install: linux-vm-postinstall.sh
+    storage: ceph-rbd       # v2.0 - live-migrate to pve02/pve03 anytime
+    ha: true
     notes: |
       Ubuntu 22.04 LTS web server, nginx, in the DMZ.
 

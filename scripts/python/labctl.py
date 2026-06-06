@@ -89,13 +89,54 @@ class VM:
     domain: str | None
     domain_member: str | None
     notes: str
+    # v2.0 - cluster-aware fields
+    storage: str | None = None       # logical storage id (must exist in cluster.storage[].id)
+    ha: bool = False                 # call ha-manager add during apply
+    ha_group: str | None = None      # name of the ha-group in the cluster
 
     @property
     def key(self) -> str:
         return f"{self.hypervisor}/{self.name}"
 
 
-def load_lab(path: Path) -> tuple[dict, list[Network], list[Hypervisor], list[VM]]:
+@dataclass
+class Storage:
+    """A shared storage definition inside a Proxmox cluster."""
+    id: str
+    type: str          # rbd | nfs | local | dir | ...
+    content: str       # comma-separated PVE content list
+    pool: str = ""     # for type=rbd
+    server: str = ""   # for type=nfs
+    export: str = ""   # for type=nfs
+
+
+@dataclass
+class HAGroup:
+    """A `ha-group` definition inside a Proxmox cluster."""
+    name: str
+    nodes: list[str]
+    restricted: bool = False
+    nofailback: bool = False
+
+
+@dataclass
+class Cluster:
+    """A Proxmox cluster: a set of hypervisors + shared storage + HA groups."""
+    name: str
+    type: str                                  # proxmox
+    hypervisors: list[str]                     # keys in lab.hypervisors
+    storage: dict[str, Storage] = field(default_factory=dict)   # id -> Storage
+    ha_groups: dict[str, HAGroup] = field(default_factory=dict)  # name -> HAGroup
+
+    def storage_for_vm(self, vm: VM) -> Storage | None:
+        """Return the Storage record for a VM, falling back to local-lvm."""
+        sid = vm.storage
+        if sid is None:
+            return None
+        return self.storage.get(sid)
+
+
+def load_lab(path: Path) -> tuple[dict, list[Network], list[Hypervisor], list[VM], list[Cluster]]:
     if not path.exists():
         raise LabError(f"lab.yaml not found: {path}")
     with path.open() as f:
@@ -124,6 +165,36 @@ def load_lab(path: Path) -> tuple[dict, list[Network], list[Hypervisor], list[VM
             extras={k: v for k, v in cfg.items() if k not in ("type", "host")},
         ))
 
+    # Clusters (v2.0)
+    clusters: list[Cluster] = []
+    for cname, ccfg in (data.get("clusters") or {}).items():
+        storage: dict[str, Storage] = {}
+        for s in ccfg.get("storage") or []:
+            sid = s["id"]
+            storage[sid] = Storage(
+                id=sid,
+                type=s.get("type", "dir"),
+                content=s.get("content", ""),
+                pool=s.get("pool", ""),
+                server=s.get("server", ""),
+                export=s.get("export", ""),
+            )
+        ha_groups: dict[str, HAGroup] = {}
+        for gname, g in (ccfg.get("ha_groups") or {}).items():
+            ha_groups[gname] = HAGroup(
+                name=gname,
+                nodes=list(g.get("nodes") or []),
+                restricted=bool(g.get("restricted", False)),
+                nofailback=bool(g.get("nofailback", False)),
+            )
+        clusters.append(Cluster(
+            name=cname,
+            type=ccfg.get("type", "proxmox"),
+            hypervisors=list(ccfg.get("hypervisors") or []),
+            storage=storage,
+            ha_groups=ha_groups,
+        ))
+
     # VMs
     vms: list[VM] = []
     for cfg in data.get("vms") or []:
@@ -145,16 +216,56 @@ def load_lab(path: Path) -> tuple[dict, list[Network], list[Hypervisor], list[VM
             domain=cfg.get("domain"),
             domain_member=cfg.get("domain_member"),
             notes=str(cfg.get("notes", "")).strip(),
+            storage=cfg.get("storage"),
+            ha=bool(cfg.get("ha", False)),
+            ha_group=cfg.get("ha_group"),
         ))
 
-    return data, nets, hvs, vms
+    return data, nets, hvs, vms, clusters
 
 
-def validate(data: dict, nets: list[Network], hvs: list[Hypervisor], vms: list[VM]) -> list[str]:
+def cluster_for_hv(clusters: list[Cluster], hv_name: str) -> Cluster | None:
+    """Return the cluster a hypervisor belongs to, or None."""
+    for c in clusters:
+        if hv_name in c.hypervisors:
+            return c
+    return None
+
+
+def validate(data: dict, nets: list[Network], hvs: list[Hypervisor],
+              vms: list[VM], clusters: list[Cluster] | None = None) -> list[str]:
     errors: list[str] = []
     net_names = {n.name for n in nets}
     hv_names = {h.name for h in hvs}
     hv_types = {h.name: h.type for h in hvs}
+    clusters = clusters or []
+
+    # Cluster-level checks
+    seen_cluster_names: set[str] = set()
+    for c in clusters:
+        if c.name in seen_cluster_names:
+            errors.append(f"duplicate cluster name: {c.name}")
+        seen_cluster_names.add(c.name)
+        for hv in c.hypervisors:
+            if hv not in hv_names:
+                errors.append(f"cluster '{c.name}': unknown hypervisor '{hv}'")
+            elif hv_types[hv] != c.type:
+                errors.append(f"cluster '{c.name}': hypervisor '{hv}' is type "
+                              f"'{hv_types[hv]}', cluster expects '{c.type}'")
+        for sid in c.storage:
+            if not sid:
+                errors.append(f"cluster '{c.name}': storage entry missing 'id'")
+        for gname, g in c.ha_groups.items():
+            for hv in g.nodes:
+                if hv not in c.hypervisors:
+                    errors.append(f"cluster '{c.name}': ha-group '{gname}' "
+                                  f"references non-member hypervisor '{hv}'")
+
+    # Index: which cluster owns each hypervisor
+    cluster_for: dict[str, Cluster] = {}
+    for c in clusters:
+        for hv in c.hypervisors:
+            cluster_for[hv] = c
 
     seen_names: set[str] = set()
     seen_vmids: dict[int, str] = {}
@@ -188,29 +299,70 @@ def validate(data: dict, nets: list[Network], hvs: list[Hypervisor], vms: list[V
         if vm.disk_gb < 10:
             errors.append(f"{vm.key}: disk_gb must be >= 10")
 
+        # v2.0 cluster checks
+        if vm.ha and vm.hypervisor in cluster_for:
+            c = cluster_for[vm.hypervisor]
+            if c.type != "proxmox":
+                errors.append(f"{vm.key}: ha: true requires a proxmox cluster")
+        elif vm.ha and vm.hypervisor not in cluster_for:
+            errors.append(f"{vm.key}: ha: true requires a cluster for '{vm.hypervisor}'")
+        if vm.ha_group and vm.hypervisor in cluster_for:
+            c = cluster_for[vm.hypervisor]
+            if vm.ha_group not in c.ha_groups:
+                errors.append(f"{vm.key}: ha_group '{vm.ha_group}' not defined "
+                              f"in cluster '{c.name}'")
+        if vm.storage and vm.hypervisor in cluster_for:
+            c = cluster_for[vm.hypervisor]
+            if vm.storage not in c.storage:
+                errors.append(f"{vm.key}: storage '{vm.storage}' not defined "
+                              f"in cluster '{c.name}'")
+
     return errors
 
 
 # =============================================================================
 # Per-hypervisor command generators
 # =============================================================================
-def proxmox_plan(vm: VM, hv: Hypervisor, nets: dict[str, Network]) -> list[str]:
+def proxmox_plan(vm: VM, hv: Hypervisor, nets: dict[str, Network],
+                 cluster: Cluster | None = None) -> list[str]:
     net = nets[vm.network]
     bridge = hv.extras.get("default_bridge", "vmbr0")
     storage = hv.extras.get("default_storage", "local-lvm")
     iso_storage = hv.extras.get("iso_storage", "local")
+    # If the VM names a cluster storage, prefer it; otherwise use the
+    # hypervisor default.  Cluster storage IDs (ceph-rbd, nfs-vm, etc.)
+    # map directly to PVE storage names.
+    if vm.storage and cluster and vm.storage in cluster.storage:
+        disk_storage = vm.storage
+    else:
+        disk_storage = storage
+    # ISO storage: if the cluster has an `iso` content storage, use it
+    iso_target = iso_storage
+    if cluster:
+        for sid, s in cluster.storage.items():
+            if "iso" in s.content and not vm.iso:
+                continue
+            if "iso" in s.content and vm.iso:
+                iso_target = sid
+                break
 
     lines: list[str] = []
-    lines.append(f"# {vm.key}  role={vm.role}  vlan={net.vlan_id}")
+    cluster_tag = f"  cluster={cluster.name}" if cluster else ""
+    ha_tag = f"  ha={vm.ha_group or 'default'}" if vm.ha else ""
+    lines.append(f"# {vm.key}  role={vm.role}  vlan={net.vlan_id}  "
+                 f"storage={disk_storage}{cluster_tag}{ha_tag}")
     lines.append(f"qm create {vm.vmid} --name {vm.name} --memory {vm.memory_mb} --cores {vm.cpu} \\")
     lines.append(f"       --net0 virtio,bridge={bridge},tag={net.vlan_id} \\")
-    lines.append(f"       --scsi0 {storage}:{vm.disk_gb} --scsihw virtio-scsi-single \\")
+    lines.append(f"       --scsi0 {disk_storage}:{vm.disk_gb} --scsihw virtio-scsi-single \\")
     lines.append("       --ostype l26 --agent enabled=1")
     if vm.iso:
-        lines.append(f"qm set {vm.vmid} --ide2 {iso_storage}:iso/{vm.iso},media=cdrom")
+        lines.append(f"qm set {vm.vmid} --ide2 {iso_target}:iso/{vm.iso},media=cdrom")
         lines.append(f"qm set {vm.vmid} --boot order=ide2")
     if vm.onboot:
         lines.append(f"qm set {vm.vmid} --onboot 1")
+    if vm.ha:
+        ha_group = vm.ha_group or "default"
+        lines.append(f"ha-manager add vm:{vm.vmid} --group {ha_group} --max_relocate 2")
     return lines
 
 
@@ -237,9 +389,12 @@ def hyperv_plan(vm: VM, hv: Hypervisor, nets: dict[str, Network]) -> list[str]:
 
 
 def gen_plan(vms: list[VM], hvs: list[Hypervisor], nets: list[Network],
-             only_hypervisor: str | None) -> list[str]:
+             only_hypervisor: str | None,
+             clusters: list[Cluster] | None = None) -> list[str]:
     net_idx = {n.name: n for n in nets}
     hv_idx = {h.name: h for h in hvs}
+    clusters = clusters or []
+    cluster_for = {hv: c for c in clusters for hv in c.hypervisors}
     out: list[str] = []
     sorted_vms = sorted(vms, key=lambda v: (v.hypervisor, v.start_order, v.name))
     for vm in sorted_vms:
@@ -249,8 +404,9 @@ def gen_plan(vms: list[VM], hvs: list[Hypervisor], nets: list[Network],
         if not hv:
             out.append(f"# SKIP {vm.key} - hypervisor not defined")
             continue
+        cluster = cluster_for.get(hv.name)
         if hv.type == "proxmox":
-            out.extend(proxmox_plan(vm, hv, net_idx))
+            out.extend(proxmox_plan(vm, hv, net_idx, cluster))
         elif hv.type == "hyperv":
             out.extend(hyperv_plan(vm, hv, net_idx))
         else:
@@ -259,7 +415,8 @@ def gen_plan(vms: list[VM], hvs: list[Hypervisor], nets: list[Network],
     return out
 
 
-def gen_create_commands(vm: VM, hv: Hypervisor, nets: dict[str, Network]) -> list[str]:
+def gen_create_commands(vm: VM, hv: Hypervisor, nets: dict[str, Network],
+                        cluster: Cluster | None = None) -> list[str]:
     """Return the per-hypervisor shell commands that provision this VM.
 
     These are the actual commands to run over the transport, not the
@@ -270,19 +427,34 @@ def gen_create_commands(vm: VM, hv: Hypervisor, nets: dict[str, Network]) -> lis
         bridge = hv.extras.get("default_bridge", "vmbr0")
         storage = hv.extras.get("default_storage", "local-lvm")
         iso_storage = hv.extras.get("iso_storage", "local")
+        # Resolve disk storage: cluster storage takes priority over default.
+        if vm.storage and cluster and vm.storage in cluster.storage:
+            disk_storage = vm.storage
+        else:
+            disk_storage = storage
+        # ISO storage: pick a cluster storage that has 'iso' in content.
+        iso_target = iso_storage
+        if cluster and vm.iso:
+            for sid, s in cluster.storage.items():
+                if "iso" in s.content:
+                    iso_target = sid
+                    break
         cmds = [
             f"qm create {vm.vmid} --name {vm.name} --memory {vm.memory_mb} --cores {vm.cpu} "
             f"--net0 virtio,bridge={bridge},tag={net.vlan_id} "
-            f"--scsi0 {storage}:{vm.disk_gb} --scsihw virtio-scsi-single "
+            f"--scsi0 {disk_storage}:{vm.disk_gb} --scsihw virtio-scsi-single "
             f"--ostype l26 --agent enabled=1",
         ]
         if vm.iso:
             cmds += [
-                f"qm set {vm.vmid} --ide2 {iso_storage}:iso/{vm.iso},media=cdrom",
+                f"qm set {vm.vmid} --ide2 {iso_target}:iso/{vm.iso},media=cdrom",
                 f"qm set {vm.vmid} --boot order=ide2",
             ]
         if vm.onboot:
             cmds.append(f"qm set {vm.vmid} --onboot 1")
+        if vm.ha:
+            ha_group = vm.ha_group or "default"
+            cmds.append(f"ha-manager add vm:{vm.vmid} --group {ha_group} --max_relocate 2")
         return cmds
 
     if hv.type == "hyperv":
@@ -472,11 +644,11 @@ def make_transport(hv: Hypervisor) -> Transport:
 # =============================================================================
 def cmd_validate(args, _) -> int:
     try:
-        data, nets, hvs, vms = load_lab(args.lab)
+        data, nets, hvs, vms, clusters = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
-    errors = validate(data, nets, hvs, vms)
+    errors = validate(data, nets, hvs, vms, clusters)
     if errors:
         print(f"[FAIL] {len(errors)} validation error(s):", file=sys.stderr)
         for e in errors:
@@ -487,14 +659,14 @@ def cmd_validate(args, _) -> int:
 
 
 def cmd_plan(args, _) -> int:
-    data, nets, hvs, vms = load_lab(args.lab)
-    errs = validate(data, nets, hvs, vms)
+    data, nets, hvs, vms, clusters = load_lab(args.lab)
+    errs = validate(data, nets, hvs, vms, clusters)
     if errs:
         print("[FAIL] validation errors:", file=sys.stderr)
         for e in errs:
             print(f"  - {e}", file=sys.stderr)
         return 1
-    plan = gen_plan(vms, hvs, nets, args.hypervisor)
+    plan = gen_plan(vms, hvs, nets, args.hypervisor, clusters)
     print(f"# Plan for {len(vms)} VM(s) in lab '{data['lab'].get('name','?')}'")
     if args.hypervisor:
         print(f"# Filtered to hypervisor: {args.hypervisor}")
@@ -512,8 +684,8 @@ def cmd_apply(args, _) -> int:
       - Refuses to run unless --execute is passed AND --yes is passed.
       - Stops on the first failure unless --keep-going.
     """
-    data, nets, hvs, vms = load_lab(args.lab)
-    errs = validate(data, nets, hvs, vms)
+    data, nets, hvs, vms, clusters = load_lab(args.lab)
+    errs = validate(data, nets, hvs, vms, clusters)
     if errs:
         print("[FAIL] validation errors:", file=sys.stderr)
         for e in errs:
@@ -527,7 +699,7 @@ def cmd_apply(args, _) -> int:
     targets.sort(key=lambda v: (v.hypervisor, v.start_order, v.name))
 
     print(f"# Apply plan: {len(targets)} VM(s)")
-    plan = gen_plan(vms, hvs, nets, args.hypervisor)
+    plan = gen_plan(vms, hvs, nets, args.hypervisor, clusters)
     for line in plan:
         print(line)
 
@@ -546,13 +718,15 @@ def cmd_apply(args, _) -> int:
 
     # Execute
     failed = 0
+    cluster_for = {hv: c for c in clusters for hv in c.hypervisors}
     for vm in targets:
         hv = hv_idx.get(vm.hypervisor)
         if hv is None:
             print(f"[SKIP] {vm.key} - no hypervisor definition")
             continue
+        cluster = cluster_for.get(hv.name)
         try:
-            cmds = gen_create_commands(vm, hv, net_idx)
+            cmds = gen_create_commands(vm, hv, net_idx, cluster)
         except Exception as e:
             print(f"[FAIL] {vm.key} - command generation error: {e}")
             failed += 1
@@ -588,7 +762,7 @@ def cmd_apply(args, _) -> int:
 
 
 def cmd_inventory(args, _) -> int:
-    data, nets, hvs, vms = load_lab(args.lab)
+    data, nets, hvs, vms, clusters = load_lab(args.lab)
     print(f"# Lab '{data['lab'].get('name','?')}' - {len(vms)} VM(s)")
     print(f"{'Hypervisor':<12} {'Name':<22} {'Role':<22} {'VLAN':<5} {'CPU':<4} {'RAM(MB)':<8} {'Disk':<6} {'Order':<6} {'Onboot'}")
     for vm in sorted(vms, key=lambda v: (v.hypervisor, v.start_order)):
@@ -599,7 +773,7 @@ def cmd_inventory(args, _) -> int:
 
 
 def cmd_start(args, _) -> int:
-    data, nets, hvs, vms = load_lab(args.lab)
+    data, nets, hvs, vms, clusters = load_lab(args.lab)
     if args.vm:
         targets = [v for v in vms if v.name == args.vm]
     else:
@@ -617,7 +791,7 @@ def cmd_start(args, _) -> int:
 
 
 def cmd_stop(args, _) -> int:
-    data, nets, hvs, vms = load_lab(args.lab)
+    data, nets, hvs, vms, clusters = load_lab(args.lab)
     if args.vm:
         targets = [v for v in vms if v.name == args.vm]
     else:

@@ -83,6 +83,54 @@ Each entry describes one VM. Required and optional keys:
 | `domain` | optional | Domain name to promote (for DCs) or join. |
 | `domain_member` | optional | Domain name to join (for member servers). |
 | `notes` | optional | Free-form text. Appears in `make plan` output. |
+| `storage` | optional (v2.0) | Proxmox storage to put the boot disk on. Defaults to the hypervisor's `default_storage`. Use `ceph-rbd` for replicated cluster storage or `nfs-vm` for NAS-backed. |
+| `ha` | optional (v2.0) | Set to `true` to make `labctl apply` also call `ha-manager add` for this VM. Requires the hypervisor to be in a Proxmox cluster. |
+| `ha_group` | optional (v2.0) | Name of the `ha-group` to bind the VM to. Defaults to `default` if `ha: true` is set. |
+
+## `clusters` Block (v2.0)
+
+A Proxmox cluster is a group of nodes that share quorum and (in
+this lab's case) share Ceph storage.  The `clusters` block groups
+hypervisors and declares shared resources that `labctl.py` can
+target without needing to know the per-host internals.
+
+```yaml
+clusters:
+  prod:
+    type: proxmox
+    hypervisors: [pve01, pve02, pve03]   # keys from the hypervisors block
+    storage:
+      - id: ceph-rbd                     # logical name; must match vms[].storage
+        type: rbd
+        pool: vm-disks
+        content: images,rootdir
+      - id: nfs-vm
+        type: nfs
+        server: 10.10.20.5
+        export: /volume1/vm
+        content: images,rootdir
+      - id: nfs-iso
+        type: nfs
+        server: 10.10.20.5
+        export: /volume1/iso
+        content: iso,vztmpl
+      - id: nfs-backup
+        type: nfs
+        server: 10.10.20.5
+        export: /volume1/backup
+        content: backup
+    ha_groups:
+      default:
+        nodes: [pve01, pve02, pve03]      # round-robin failover
+        restricted: false                # if true, VMs only land on these nodes
+        nofailback: false
+```
+
+`labctl.py` resolves a VM's `storage` field against this list to
+pick the right `qm create` flag (e.g. `--scsi0 ceph-rbd:20` vs
+`--scsi0 nfs-vm:20`).  See
+[docs/cluster-storage-decision.md](cluster-storage-decision.md) for
+the design rationale.
 
 ## Validation Rules (enforced by `make validate`)
 
@@ -93,12 +141,18 @@ Each entry describes one VM. Required and optional keys:
 - `name` must be unique across the whole lab.
 - `start_order` must be an integer 1-999.
 - `cpu` >= 1, `memory_mb` >= 256, `disk_gb` >= 10.
+- v2.0: every cluster in `clusters` must reference existing
+  hypervisors; every `vms[].storage` (if set) must exist in the
+  storage list of the cluster the VM's hypervisor belongs to;
+  every `vms[].ha_group` (if set) must exist in the cluster's
+  `ha_groups`.
+- v2.0: a VM with `ha: true` must live on a hypervisor that
+  belongs to a Proxmox cluster.
 
 ## Future Extensions
 
-These are intentionally not in v1.0 but are queued:
+These are intentionally not in v2.0 but are queued:
 
 - `vms[].tags` - free-form key/value tags (used for filtering in `make` targets)
 - `vms[].data_disks[]` - additional vHDX/qcow2 attachments
 - `vms[].backup_schedule` - per-VM retention override
-- `cluster` block - Proxmox cluster + shared storage definition
