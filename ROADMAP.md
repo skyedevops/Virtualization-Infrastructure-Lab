@@ -12,7 +12,7 @@ between lists as work progresses.
 | **v1.0 - Initial Lab Build** | Complete | `bf355d2` |
 | **v1.1 - Video Script + Trade-off Docs** | Complete | `2ae4f81` |
 | **v1.2 - Roadmap** | In progress | this commit |
-| **v1.3 - Diagrams** | Planned | - |
+| **v1.3 - Diagrams** | Complete | this commit |
 | **v1.4 - Lab-in-a-Box Bootstrap** | Planned | - |
 | **v2.0 - Multi-Host Proxmox Cluster** | Planned | - |
 | **v2.1 - Proxmox Backup Server** | Planned | - |
@@ -30,10 +30,10 @@ between lists as work progresses.
 Documentation and reproducibility polish. No new lab hardware.
 
 ### v1.3 - Architecture Diagrams
-- [ ] Mermaid / draw.io source for the topology in `docs/lab-topology.md`
-- [ ] Sequence diagram for DR restore (Scenario 2)
-- [ ] Diagram for Proxmox VM-to-physical bridge mapping
-- [ ] Per-hypervisor network stack diagram (VLAN/bridge/port)
+- [x] Mermaid / draw.io source for the topology in `docs/lab-topology.md`
+- [x] Sequence diagram for DR restore (Scenario 2)
+- [x] Diagram for Proxmox VM-to-physical bridge mapping
+- [x] Per-hypervisor network stack diagram (VLAN/bridge/port)
 
 ### v1.4 - Lab-in-a-Box Bootstrap
 - [ ] `make` / `make.ps1` targets: `init`, `vm`, `backup`, `restore`, `drill`, `destroy`
