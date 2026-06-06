@@ -12,7 +12,7 @@ SHELL     := /usr/bin/env bash
 .SHELLFLAGS := -eu -o pipefail -c
 .DEFAULT_GOAL := help
 
-.PHONY: help validate plan apply inventory start stop backup drill migrate ha-status ha-drill clean
+.PHONY: help validate plan apply inventory start stop backup drill migrate ha-status ha-drill pbs-status pbs-init pbs-restore-test clean
 
 help:                   ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -35,7 +35,7 @@ start:                  ## Power on every VM in start order
 stop:                   ## Power off every VM in reverse order
 	$(PY) $(LABCTL) --lab $(LAB) stop
 
-backup:                 ## Show the backup commands
+backup:                 ## Show the per-job PBS backup commands (v2.1)
 	$(PY) $(LABCTL) --lab $(LAB) backup
 
 drill:                  ## Walk the DR runbook for one VM
@@ -52,6 +52,15 @@ ha-status:              ## Show Proxmox HA status for every cluster (v2.0)
 ha-drill:               ## Fence/unfence a node to drill HA failover (v2.0)
 	@test -n "$(NODE)" || (echo "NODE= required" >&2; exit 2)
 	$(PY) $(LABCTL) --lab $(LAB) drill-ha-failover --node $(NODE) --execute --yes
+
+pbs-status:             ## Show PBS datastore + snapshot summary (v2.1)
+	$(PY) $(LABCTL) --lab $(LAB) pbs-status
+
+pbs-init:               ## Initialise PBS datastores declared in lab.yaml (v2.1)
+	$(PY) $(LABCTL) --lab $(LAB) pbs-init --execute
+
+pbs-restore-test:       ## Restore a random backup into a test VM (v2.1)
+	$(PY) $(LABCTL) --lab $(LAB) pbs-restore-test --execute
 
 clean:                  ## Remove transient plan output
 	rm -rf .lab-plan/

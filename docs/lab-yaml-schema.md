@@ -132,6 +132,66 @@ pick the right `qm create` flag (e.g. `--scsi0 ceph-rbd:20` vs
 [docs/cluster-storage-decision.md](cluster-storage-decision.md) for
 the design rationale.
 
+## `pbs_servers` Block (v2.1)
+
+A mapping of PBS-instance-name to its connection + datastore config.
+PBS is *not* a hypervisor (no VMs run on it); it's a target that the
+PVE cluster streams backups to.  See
+[docs/pbs-decision.md](pbs-decision.md) for the deployment decision.
+
+```yaml
+pbs_servers:
+  pbs01:
+    host: 10.10.20.5              # IP or DNS of the PBS host
+    ssh_user: root                # PBS admin user (root for bare-metal, or a
+                                  #  PBS user with DatastoreAdmin role for Synology)
+    ssh_port: 22
+    ssh_key: ~/.ssh/id_ed25519
+    ssh_options: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    datastores:
+      main:
+        path: /volume1/pbs/main   # where chunks live
+        keep_last: 3
+        keep_daily: 7
+        keep_weekly: 4
+        keep_monthly: 6
+        prune_run: "mon..sat 02:00"  # PBS calendar syntax
+      offsite:
+        path: /volume1/pbs/offsite
+        keep_last: 2
+        keep_daily: 14
+        keep_weekly: 8
+        keep_monthly: 12
+        prune_run: "sun 03:00"
+```
+
+## `backup_jobs` Block (v2.1)
+
+A list of per-VM backup jobs.  Each entry becomes a
+`proxmox-backup-manager backup` + `prune` + `job create` triple on
+the **source** PVE node, streaming to the named PBS datastore.
+
+```yaml
+backup_jobs:
+  - name: nightly-web01
+    vm: web01                # must match a vms[].name
+    pbs: pbs01               # must match a pbs_servers{} key
+    datastore: main          # must match a datastores{} key on that pbs
+    schedule: "mon..sun 03:00"
+    mode: snapshot           # snapshot | stop | suspend
+    keep_last: 3
+    keep_daily: 7
+    keep_weekly: 4
+    keep_monthly: 6
+    notify: backup-admin@lab.local   # empty string to disable
+    enabled: true                     # false to skip in `labctl backup`
+```
+
+`mode: stop` shuts the VM down for the duration (shortest window,
+most disruptive).  `mode: suspend` uses cpususpend (a few-second
+stutter, no downtime).  `mode: snapshot` is the default and the only
+one that gives true zero-downtime via the QEMU snapshot mechanism.
+
 ## Validation Rules (enforced by `make validate`)
 
 - Every `vms[].hypervisor` must exist in `hypervisors`.
@@ -148,6 +208,10 @@ the design rationale.
   `ha_groups`.
 - v2.0: a VM with `ha: true` must live on a hypervisor that
   belongs to a Proxmox cluster.
+- v2.1: every `backup_jobs[].pbs` must match a `pbs_servers{}` key;
+  every `backup_jobs[].datastore` must exist on that PBS server;
+  every `backup_jobs[].vm` must match a `vms[].name`; `mode` must
+  be one of `snapshot | stop | suspend`; `keep_last` >= 1.
 
 ## Future Extensions
 

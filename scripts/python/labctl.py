@@ -136,7 +136,56 @@ class Cluster:
         return self.storage.get(sid)
 
 
-def load_lab(path: Path) -> tuple[dict, list[Network], list[Hypervisor], list[VM], list[Cluster]]:
+@dataclass
+class PbsDatastore:
+    """A PBS datastore: where chunks live, and prune policy."""
+    name: str                  # e.g. "main"
+    path: str                  # e.g. "/backup/pbs/main"
+    keep_last: int = 3
+    keep_daily: int = 7
+    keep_weekly: int = 4
+    keep_monthly: int = 6
+    prune_run: str = "mon..sat 02:00"   # PBS prune-job schedule (cron-ish)
+
+
+@dataclass
+class PbsServer:
+    """A Proxmox Backup Server instance: a host with one or more datastores.
+
+    The host can be a bare-metal PBS, a PBS VM, or a Synology PBS package -
+    anything reachable over SSH that runs proxmox-backup-manager.
+    """
+    name: str
+    host: str
+    ssh_user: str = "root"
+    ssh_port: int = 22
+    datastores: dict[str, PbsDatastore] = field(default_factory=dict)
+    extras: dict = field(default_factory=dict)
+
+
+@dataclass
+class BackupJob:
+    """A backup job: one VM, one PBS datastore, one schedule, one retention.
+
+    The `schedule` is a PBS job calendar string (e.g. "mon..fri 03:00")
+    interpreted by `proxmox-backup-manager job run` from cron.
+    """
+    name: str
+    vm: str                    # vm name in lab.yaml
+    datastore: str             # pbs datastore id, e.g. "main"
+    pbs: str                   # pbs server name, e.g. "pbs01"
+    schedule: str = "daily 03:00"
+    mode: str = "snapshot"     # snapshot | stop | suspend
+    keep_last: int = 3
+    keep_daily: int = 7
+    keep_weekly: int = 4
+    keep_monthly: int = 6
+    enabled: bool = True
+    notify: str = ""           # email address, blank for none
+
+
+def load_lab(path: Path) -> tuple[dict, list[Network], list[Hypervisor], list[VM],
+                                  list[Cluster], list[PbsServer], list[BackupJob]]:
     if not path.exists():
         raise LabError(f"lab.yaml not found: {path}")
     with path.open() as f:
@@ -221,7 +270,49 @@ def load_lab(path: Path) -> tuple[dict, list[Network], list[Hypervisor], list[VM
             ha_group=cfg.get("ha_group"),
         ))
 
-    return data, nets, hvs, vms, clusters
+    # PBS servers (v2.1)
+    pbs_servers: list[PbsServer] = []
+    for pname, pcfg in (data.get("pbs_servers") or {}).items():
+        stores: dict[str, PbsDatastore] = {}
+        for dsname, dcfg in (pcfg.get("datastores") or {}).items():
+            stores[dsname] = PbsDatastore(
+                name=dsname,
+                path=dcfg.get("path", f"/backup/pbs/{dsname}"),
+                keep_last=int(dcfg.get("keep_last", 3)),
+                keep_daily=int(dcfg.get("keep_daily", 7)),
+                keep_weekly=int(dcfg.get("keep_weekly", 4)),
+                keep_monthly=int(dcfg.get("keep_monthly", 6)),
+                prune_run=dcfg.get("prune_run", "mon..sat 02:00"),
+            )
+        pbs_servers.append(PbsServer(
+            name=pname,
+            host=pcfg["host"],
+            ssh_user=pcfg.get("ssh_user", "root"),
+            ssh_port=int(pcfg.get("ssh_port", 22)),
+            datastores=stores,
+            extras={k: v for k, v in pcfg.items()
+                    if k not in ("host", "ssh_user", "ssh_port", "datastores")},
+        ))
+
+    # Backup jobs (v2.1)
+    backup_jobs: list[BackupJob] = []
+    for jcfg in data.get("backup_jobs") or []:
+        backup_jobs.append(BackupJob(
+            name=jcfg["name"],
+            vm=jcfg["vm"],
+            datastore=jcfg["datastore"],
+            pbs=jcfg["pbs"],
+            schedule=jcfg.get("schedule", "daily 03:00"),
+            mode=jcfg.get("mode", "snapshot"),
+            keep_last=int(jcfg.get("keep_last", 3)),
+            keep_daily=int(jcfg.get("keep_daily", 7)),
+            keep_weekly=int(jcfg.get("keep_weekly", 4)),
+            keep_monthly=int(jcfg.get("keep_monthly", 6)),
+            enabled=bool(jcfg.get("enabled", True)),
+            notify=jcfg.get("notify", ""),
+        ))
+
+    return data, nets, hvs, vms, clusters, pbs_servers, backup_jobs
 
 
 def cluster_for_hv(clusters: list[Cluster], hv_name: str) -> Cluster | None:
@@ -233,7 +324,9 @@ def cluster_for_hv(clusters: list[Cluster], hv_name: str) -> Cluster | None:
 
 
 def validate(data: dict, nets: list[Network], hvs: list[Hypervisor],
-              vms: list[VM], clusters: list[Cluster] | None = None) -> list[str]:
+              vms: list[VM], clusters: list[Cluster] | None = None,
+              pbs_servers: list[PbsServer] | None = None,
+              backup_jobs: list[BackupJob] | None = None) -> list[str]:
     errors: list[str] = []
     net_names = {n.name for n in nets}
     hv_names = {h.name for h in hvs}
@@ -316,6 +409,29 @@ def validate(data: dict, nets: list[Network], hvs: list[Hypervisor],
             if vm.storage not in c.storage:
                 errors.append(f"{vm.key}: storage '{vm.storage}' not defined "
                               f"in cluster '{c.name}'")
+
+    # v2.1 PBS checks
+    pbs_servers = pbs_servers or []
+    backup_jobs = backup_jobs or []
+    pbs_names = {p.name for p in pbs_servers}
+    seen_job_names: set[str] = set()
+    for j in backup_jobs:
+        if j.name in seen_job_names:
+            errors.append(f"backup job: duplicate name '{j.name}'")
+        seen_job_names.add(j.name)
+        if j.pbs not in pbs_names:
+            errors.append(f"backup job '{j.name}': unknown pbs server '{j.pbs}'")
+        else:
+            pbs = next(p for p in pbs_servers if p.name == j.pbs)
+            if j.datastore not in pbs.datastores:
+                errors.append(f"backup job '{j.name}': datastore '{j.datastore}' "
+                              f"not defined on pbs server '{j.pbs}'")
+        if j.mode not in ("snapshot", "stop", "suspend"):
+            errors.append(f"backup job '{j.name}': mode must be snapshot|stop|suspend")
+        if j.vm not in {v.name for v in vms}:
+            errors.append(f"backup job '{j.name}': unknown VM '{j.vm}'")
+        if j.keep_last < 1:
+            errors.append(f"backup job '{j.name}': keep_last must be >= 1")
 
     return errors
 
@@ -644,11 +760,11 @@ def make_transport(hv: Hypervisor) -> Transport:
 # =============================================================================
 def cmd_validate(args, _) -> int:
     try:
-        data, nets, hvs, vms, clusters = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
-    errors = validate(data, nets, hvs, vms, clusters)
+    errors = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs)
     if errors:
         print(f"[FAIL] {len(errors)} validation error(s):", file=sys.stderr)
         for e in errors:
@@ -660,8 +776,8 @@ def cmd_validate(args, _) -> int:
 
 
 def cmd_plan(args, _) -> int:
-    data, nets, hvs, vms, clusters = load_lab(args.lab)
-    errs = validate(data, nets, hvs, vms, clusters)
+    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+    errs = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs)
     if errs:
         print("[FAIL] validation errors:", file=sys.stderr)
         for e in errs:
@@ -685,8 +801,8 @@ def cmd_apply(args, _) -> int:
       - Refuses to run unless --execute is passed AND --yes is passed.
       - Stops on the first failure unless --keep-going.
     """
-    data, nets, hvs, vms, clusters = load_lab(args.lab)
-    errs = validate(data, nets, hvs, vms, clusters)
+    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+    errs = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs)
     if errs:
         print("[FAIL] validation errors:", file=sys.stderr)
         for e in errs:
@@ -763,7 +879,7 @@ def cmd_apply(args, _) -> int:
 
 
 def cmd_inventory(args, _) -> int:
-    data, nets, hvs, vms, clusters = load_lab(args.lab)
+    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
     print(f"# Lab '{data['lab'].get('name','?')}' - {len(vms)} VM(s)")
     print(f"{'Hypervisor':<12} {'Name':<22} {'Role':<22} {'VLAN':<5} {'CPU':<4} {'RAM(MB)':<8} {'Disk':<6} {'Order':<6} {'Onboot'}")
     for vm in sorted(vms, key=lambda v: (v.hypervisor, v.start_order)):
@@ -774,7 +890,7 @@ def cmd_inventory(args, _) -> int:
 
 
 def cmd_start(args, _) -> int:
-    data, nets, hvs, vms, clusters = load_lab(args.lab)
+    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
     if args.vm:
         targets = [v for v in vms if v.name == args.vm]
     else:
@@ -792,7 +908,7 @@ def cmd_start(args, _) -> int:
 
 
 def cmd_stop(args, _) -> int:
-    data, nets, hvs, vms, clusters = load_lab(args.lab)
+    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
     if args.vm:
         targets = [v for v in vms if v.name == args.vm]
     else:
@@ -809,10 +925,227 @@ def cmd_stop(args, _) -> int:
 
 
 def cmd_backup(args, _) -> int:
-    print("# Per-hypervisor backup commands:")
-    print("#   Proxmox : vzdump --all 1 --storage nas-backup --prune-backups keep-last=3,keep-daily=7,keep-weekly=4")
-    print("#   Hyper-V : Backup-VMCheckpoints.ps1 -ExportPath E:\\Exports -RetainDays 7")
-    print("# See scripts/bash/backup-all-vms.sh and hypervisors/hyper-v/scripts/Backup-VMCheckpoints.ps1")
+    """Print the per-job PBS backup commands.
+
+    Each `backup_jobs:` entry becomes a `proxmox-backup-manager backup`
+    command (run on the *source* PVE node, not on PBS itself) that
+    streams the VM to the PBS datastore.  The matching prune job
+    (prune-by-keep-options) is also emitted, plus a one-line
+    `proxmox-backup-manager job create` so the schedule survives
+    reboots.
+    """
+    try:
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    errs = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs)
+    if errs:
+        print("[FAIL] validation errors:", file=sys.stderr)
+        for e in errs:
+            print(f"  - {e}", file=sys.stderr)
+        return 1
+    if not backup_jobs:
+        print("# No backup_jobs block in lab.yaml; nothing to print.")
+        print("# Add one to enable PBS-managed backups.  See docs/lab-yaml-schema.md.")
+        return 0
+    print(f"# {len(backup_jobs)} backup job(s) across {len(pbs_servers)} PBS server(s):\n")
+    for j in backup_jobs:
+        if not j.enabled:
+            print(f"# (skip) job '{j.name}' is disabled\n")
+            continue
+        vm = next((v for v in vms if v.name == j.vm), None)
+        if vm is None:
+            print(f"# (skip) job '{j.name}': VM '{j.vm}' not found")
+            continue
+        # The backup command runs on the SOURCE PVE node, not on PBS.
+        src_hv = next((h for h in hvs if h.name == vm.hypervisor), None)
+        if src_hv is None or src_hv.type != "proxmox":
+            print(f"# (skip) job '{j.name}': VM '{j.vm}' not on a Proxmox host "
+                  f"(Hyper-V backups are not handled by PBS in this lab)")
+            continue
+        pbs = next((p for p in pbs_servers if p.name == j.pbs), None)
+        if pbs is None:
+            continue
+        # The two commands that together implement the job.
+        backup_cmd = (
+            f"proxmox-backup-manager backup "
+            f"{j.datastore}:backup-{j.vm} "
+            f"--vmid {vm.vmid} --node {src_hv.name} "
+            f"--storage {j.datastore} --mode {j.mode} "
+            f"--notification-mode {('notification-system' if j.notify else 'none')}"
+        )
+        prune_cmd = (
+            f"proxmox-backup-manager prune "
+            f"{j.datastore}:backup-{j.vm} "
+            f"--keep-last {j.keep_last} --keep-daily {j.keep_daily} "
+            f"--keep-weekly {j.keep_weekly} --keep-monthly {j.keep_monthly}"
+        )
+        job_create = (
+            f"proxmox-backup-manager job create {j.name} "
+            f"--schedule \"{j.schedule}\" --backup {backup_cmd} "
+            f"--prune {prune_cmd} --notification-mode "
+            f"{('notification-system' if j.notify else 'none')}"
+        )
+        print(f"# job '{j.name}': vm={j.vm}  pbs={j.pbs}/{j.datastore}  "
+              f"schedule={j.schedule}  mode={j.mode}")
+        print(f"#   (run on {src_hv.name}={src_hv.host}, NOT on PBS)")
+        print(f"  $ {backup_cmd}")
+        print(f"  $ {prune_cmd}")
+        print(f"  $ {job_create}")
+        print()
+    return 0
+
+
+# =============================================================================
+# v2.1 PBS subcommands
+# =============================================================================
+def _find_pbs(name: str, pbs_servers: list[PbsServer]) -> PbsServer | None:
+    for p in pbs_servers:
+        if p.name == name:
+            return p
+    return None
+
+
+def _pbs_run(pbs: PbsServer, command: str) -> CommandResult:
+    """Run a command on the PBS host over SSH."""
+    ssh_key = pbs.extras.get("ssh_key")
+    ssh_opts = pbs.extras.get("ssh_options", "")
+    ssh_args = [
+        "ssh",
+        "-p", str(pbs.ssh_port),
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+    ]
+    if ssh_opts:
+        ssh_args += ["-o", ssh_opts]
+    if ssh_key:
+        ssh_args += ["-i", os.fspath(Path(ssh_key).expanduser())]
+    ssh_args += [f"{pbs.ssh_user}@{pbs.host}", "--", command]
+    try:
+        cp = subprocess.run(ssh_args, capture_output=True, text=True, timeout=60)
+        return CommandResult(pbs.host, command, cp.returncode, cp.stdout, cp.stderr)
+    except FileNotFoundError:
+        return CommandResult(pbs.host, command, 127, "", "ssh: command not found on PATH")
+    except subprocess.TimeoutExpired:
+        return CommandResult(pbs.host, command, 124, "", "ssh: timeout")
+    except Exception as e:
+        return CommandResult(pbs.host, command, 1, "", f"ssh: {e}")
+
+
+def cmd_pbs_status(args, _) -> int:
+    """Show PBS datastore + snapshot summary for every PBS server."""
+    try:
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    if not pbs_servers:
+        print("[INFO] no pbs_servers block in lab.yaml", file=sys.stderr)
+        return 0
+    rc = 0
+    for pbs in pbs_servers:
+        print(f"# PBS: {pbs.name} ({pbs.host}:{pbs.ssh_port})  "
+              f"{len(pbs.datastores)} datastore(s)")
+        # Datastore list
+        res = _pbs_run(pbs, "proxmox-backup-manager datastore list --output-format json")
+        if res.returncode != 0:
+            print(f"  [FAIL] datastore list returned {res.returncode}", file=sys.stderr)
+            if res.stderr:
+                print(res.stderr, end="", file=sys.stderr)
+            rc = 1
+            continue
+        for line in res.stdout.splitlines():
+            if line.strip():
+                print(f"  datastore: {line.rstrip()}")
+        # Disk usage per datastore
+        for dsname, ds in pbs.datastores.items():
+            du = _pbs_run(pbs, f"du -sh {ds.path} 2>/dev/null || echo unknown")
+            print(f"  usage: {dsname} -> {du.stdout.strip() or '(unknown)'}")
+    return rc
+
+
+def cmd_pbs_init(args, _) -> int:
+    """Initialise the PBS datastores declared in lab.yaml.
+
+    Dry-run by default; --execute actually runs the commands.
+    On a fresh PBS install this creates the datastore directory tree,
+    `proxmox-backup-manager datastore create`s each one, and configures
+    the per-datastore prune job.
+    """
+    try:
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    if not pbs_servers:
+        print("[FAIL] no pbs_servers block in lab.yaml", file=sys.stderr)
+        return 1
+    for pbs in pbs_servers:
+        print(f"# PBS: {pbs.name} ({pbs.host})")
+        for dsname, ds in pbs.datastores.items():
+            cmds = [
+                f"mkdir -p {ds.path}/.chunks",
+                f"proxmox-backup-manager datastore create {dsname} {ds.path}",
+                f"proxmox-backup-manager prune-job create {dsname}-prune "
+                f"--schedule \"{ds.prune_run}\" "
+                f"--keep-last {ds.keep_last} --keep-daily {ds.keep_daily} "
+                f"--keep-weekly {ds.keep_weekly} --keep-monthly {ds.keep_monthly}",
+            ]
+            for c in cmds:
+                if not args.execute:
+                    print(f"  [dry-run] {c}")
+                else:
+                    res = _pbs_run(pbs, c)
+                    if res.stdout:
+                        print(res.stdout, end="")
+                    if res.stderr:
+                        print(res.stderr, end="", file=sys.stderr)
+                    if res.returncode != 0:
+                        print(f"  [FAIL] rc={res.returncode}: {c}", file=sys.stderr)
+                        return 1
+        if not args.execute:
+            print(f"  [--] dry-run. Pass --execute to apply on {pbs.name}.",
+                  file=sys.stderr)
+    if args.execute:
+        print("[OK] PBS datastores initialised.")
+    return 0
+
+
+def cmd_pbs_restore_test(args, _) -> int:
+    """Pick a random backup from the last N days, restore it to a
+    test VM, boot it in an isolated VLAN, smoke-test, tear down.
+
+    The actual VM restore + boot is delegated to scripts/bash/pbs-restore-test.sh
+    on the PBS host; this subcommand prints the summary report and
+    verifies the test VM is gone afterwards.
+    """
+    try:
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    pbs = _find_pbs(args.pbs, pbs_servers) if args.pbs else (pbs_servers[0] if pbs_servers else None)
+    if pbs is None:
+        print("[FAIL] no PBS server configured", file=sys.stderr)
+        return 1
+    print(f"# restore-test on PBS {pbs.name} ({pbs.host})")
+    cmd = "scripts/bash/pbs-restore-test.sh"
+    if args.datastore:
+        cmd += f" --datastore {args.datastore}"
+    if args.execute:
+        cmd += " --execute"
+    print(f"#   $ {cmd}")
+    res = _pbs_run(pbs, cmd)
+    if res.stdout:
+        print(res.stdout, end="")
+    if res.stderr:
+        print(res.stderr, end="", file=sys.stderr)
+    if res.returncode != 0:
+        print(f"[FAIL] pbs-restore-test.sh returned {res.returncode}", file=sys.stderr)
+        return 1
+    print("[OK] restore-test complete.")
     return 0
 
 
@@ -859,7 +1192,7 @@ def cmd_migrate(args, _) -> int:
     Dry-run by default; pass --execute to actually migrate.
     """
     try:
-        data, nets, hvs, vms, clusters = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
@@ -911,7 +1244,7 @@ def cmd_migrate(args, _) -> int:
 def cmd_ha_status(args, _) -> int:
     """Show HA status for every Proxmox cluster in the lab."""
     try:
-        data, nets, hvs, vms, clusters = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
@@ -952,7 +1285,7 @@ def cmd_drill_ha_failover(args, _) -> int:
     node.  Use --unfence to restore the original state.
     """
     try:
-        data, nets, hvs, vms, clusters = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
@@ -1054,7 +1387,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("backup", help="Show the backup commands for this lab").set_defaults(func=cmd_backup)
 
-    sp =     sub.add_parser("drill", help="Walk a DR drill for one VM")
+    sp = sub.add_parser("drill", help="Walk a DR drill for one VM")
     sp.add_argument("--vm", required=True, help="VM name")
     sp.set_defaults(func=cmd_drill)
 
@@ -1079,6 +1412,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--yes", action="store_true",
                     help="Skip the confirmation prompt")
     sp.set_defaults(func=cmd_drill_ha_failover)
+
+    # v2.1 - Proxmox Backup Server
+    sp = sub.add_parser("pbs-status", help="Show PBS datastore + snapshot summary")
+    sp.set_defaults(func=cmd_pbs_status)
+
+    sp = sub.add_parser("pbs-init", help="Initialise PBS datastores declared in lab.yaml")
+    sp.add_argument("--execute", action="store_true",
+                    help="Actually run the init (default: dry-run)")
+    sp.set_defaults(func=cmd_pbs_init)
+
+    sp = sub.add_parser("pbs-restore-test",
+                        help="Restore a random backup into a test VM and smoke-test it")
+    sp.add_argument("--pbs", help="PBS server name (default: first one in lab.yaml)")
+    sp.add_argument("--datastore", help="Limit to one datastore (default: all)")
+    sp.add_argument("--execute", action="store_true",
+                    help="Actually run the restore test (default: dry-run)")
+    sp.set_defaults(func=cmd_pbs_restore_test)
 
     return p
 

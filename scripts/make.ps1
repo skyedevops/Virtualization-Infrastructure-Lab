@@ -16,12 +16,15 @@
 param(
     [Parameter(Position=0)] [ValidateSet(
         'help','validate','plan','apply','inventory','start','stop',
-        'backup','drill','migrate','ha-status','ha-drill','clean')]
+        'backup','drill','migrate','ha-status','ha-drill',
+        'pbs-status','pbs-init','pbs-restore-test','clean')]
     [string] $Target = 'help',
     [string] $Lab = 'lab.yaml',
     [string] $VM,
     [string] $TargetNode,
     [string] $Node,
+    [string] $Pbs,
+    [string] $Datastore,
     [string] $Python = 'python'
 )
 
@@ -52,12 +55,26 @@ switch ($Target) {
         }
         $pyArgs += @('drill-ha-failover', '--node', $Node, '--execute', '--yes')
     }
+    'pbs-init' {
+        $pyArgs += @('pbs-init', '--execute')
+    }
+    'pbs-status' {
+        $pyArgs += @('pbs-status')
+    }
+    'pbs-restore-test' {
+        $extra = @('pbs-restore-test', '--execute')
+        if ($Pbs)       { $extra += @('--pbs', $Pbs) }
+        if ($Datastore) { $extra += @('--datastore', $Datastore) }
+        $pyArgs += $extra
+    }
     'help' {
-        Write-Host "Targets: validate, plan, apply, inventory, start, stop, backup, drill, migrate, ha-status, ha-drill, clean" -ForegroundColor Cyan
+        Write-Host "Targets: validate, plan, apply, inventory, start, stop, backup, drill, migrate, ha-status, ha-drill, pbs-status, pbs-init, pbs-restore-test, clean" -ForegroundColor Cyan
         Write-Host "Example:  .\make.ps1 plan"
         Write-Host "          .\make.ps1 drill -VM web01"
         Write-Host "          .\make.ps1 migrate -VM pfsense -TargetNode pve02"
         Write-Host "          .\make.ps1 ha-drill -Node pve01"
+        Write-Host "          .\make.ps1 pbs-init"
+        Write-Host "          .\make.ps1 pbs-restore-test -Pbs pbs01 -Datastore main"
         return
     }
     default { $pyArgs += $Target }

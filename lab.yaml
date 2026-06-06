@@ -246,3 +246,82 @@ vms:
     domain_member: lab.local
     notes: |
       RSAT admin workstation. Joins the lab domain.
+
+# v2.1 - Proxmox Backup Server.  Decision: PBS VM on the existing
+# Synology NAS, datastore on a dedup Btrfs volume.  See
+# docs/pbs-decision.md.
+pbs_servers:
+  pbs01:
+    host: 10.10.20.5          # Synology NAS
+    ssh_user: root
+    ssh_port: 22
+    ssh_key: ~/.ssh/id_ed25519
+    ssh_options: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    datastores:
+      main:
+        path: /volume1/pbs/main
+        keep_last: 3
+        keep_daily: 7
+        keep_weekly: 4
+        keep_monthly: 6
+        prune_run: "mon..sat 02:00"
+      offsite:
+        path: /volume1/pbs/offsite
+        keep_last: 2
+        keep_daily: 14
+        keep_weekly: 8
+        keep_monthly: 12
+        prune_run: "sun 03:00"
+
+# v2.1 - Backup jobs.  Each entry becomes a proxmox-backup-manager
+# backup + prune + job create.  Schedule is PBS calendar syntax.
+backup_jobs:
+  - name: nightly-pfsense
+    vm: pfsense
+    pbs: pbs01
+    datastore: main
+    schedule: "mon..sun 03:00"
+    mode: snapshot
+    keep_last: 3
+    keep_daily: 7
+    keep_weekly: 4
+    keep_monthly: 6
+    notify: backup-admin@lab.local
+    notes: Firewall config is small; nightly snapshot is enough.
+
+  - name: nightly-web01
+    vm: web01
+    pbs: pbs01
+    datastore: main
+    schedule: "mon..sun 03:30"
+    mode: snapshot
+    keep_last: 3
+    keep_daily: 7
+    keep_weekly: 4
+    keep_monthly: 6
+    notes: DMZ web server.
+
+  - name: nightly-grafana
+    vm: grafana
+    pbs: pbs01
+    datastore: main
+    schedule: "mon..sun 04:00"
+    mode: snapshot
+    keep_last: 3
+    keep_daily: 7
+    keep_weekly: 4
+    keep_monthly: 6
+    notes: Prometheus + Grafana dashboards.
+
+  - name: weekly-pbs-itself
+    vm: pbs01
+    pbs: pbs01
+    datastore: offsite
+    schedule: "sun 05:00"
+    mode: snapshot
+    keep_last: 2
+    keep_daily: 14
+    keep_weekly: 8
+    keep_monthly: 12
+    notes: PBS itself backed up weekly to a separate datastore
+      so we can recover the backup server config if the NAS dies.
