@@ -24,7 +24,7 @@ python3 multi-hypervisor-report.py \
    --hyperv  reports/hyperv-20260131.csv \
    --proxmox reports/proxmox-20260131.csv \
    --out     reports/lab-summary-20260131.md
-```
+```text
 
 ## Recommended Cron / Scheduled Tasks
 

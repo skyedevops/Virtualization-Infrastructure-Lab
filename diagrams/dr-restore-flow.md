@@ -46,7 +46,7 @@ sequenceDiagram
         Admin->>Console: Decommission old VM
         Admin->>Console: Log drill in<br/>recovery-drills.md
     end
-```
+```text
 
 ## Step-by-Step Time Budget
 
@@ -77,7 +77,7 @@ flowchart TD
     Q3 -- Yes --> Q4{Service<br/>starts?}
     Q4 -- No --> A4[Check host keys reset,<br/>network up, DNS resolvable]
     Q4 -- Yes --> Done([RTO achieved])
-```
+```text
 
 ## Validation Checklist (executed by `Smoke` actor)
 

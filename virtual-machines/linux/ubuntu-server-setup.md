@@ -62,7 +62,7 @@ sudo apt install -y \
 # hostname (if not set during install)
 sudo hostnamectl set-hostname web01.lab.local
 sudo timedatectl set-timezone UTC
-```
+```text
 
 ## 3. Static IP via netplan
 
@@ -81,14 +81,14 @@ network:
       nameservers:
         addresses: [10.10.20.10, 1.1.1.1]
         search: [lab.local]
-```
+```text
 
 ```bash
 sudo chmod 600 /etc/netplan/00-installer-config.yaml
 sudo netplan generate
 sudo netplan apply
 ip a; ip r; resolvectl status
-```
+```text
 
 ## 4. SSH Hardening
 
@@ -106,7 +106,7 @@ sudo sed -ri \
   -e 's|^#?MaxAuthTries.*|MaxAuthTries 3|' \
   /etc/ssh/sshd_config
 sudo systemctl reload ssh
-```
+```text
 
 ## 5. Firewall
 
@@ -119,7 +119,7 @@ sudo ufw allow OpenSSH
 # sudo ufw allow 443/tcp
 sudo ufw --force enable
 sudo ufw status verbose
-```
+```text
 
 ## 6. fail2ban + auto-updates
 
@@ -127,7 +127,7 @@ sudo ufw status verbose
 sudo systemctl enable --now fail2ban
 sudo systemctl enable --now unattended-upgrades
 sudo dpkg-reconfigure -plow unattended-upgrades   # confirm "Yes"
-```
+```text
 
 ## 7. Hypervisor Guest Agent
 
@@ -167,7 +167,7 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now node_exporter
 sudo ufw allow from 10.10.20.0/24 to any port 9100 proto tcp
-```
+```text
 
 ## 9. Baseline Snapshot
 
@@ -190,6 +190,6 @@ sudo apt clean
 sudo rm -rf /var/lib/apt/lists/*
 history -c
 sudo shutdown -h now
-```
+```text
 
 Take a snapshot named `golden` on the powered-off VM. Future VMs are linked clones of this snapshot.

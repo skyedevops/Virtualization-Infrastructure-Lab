@@ -66,10 +66,12 @@ def main() -> int:
 
     rows: list[dict] = []
     if args.hyperv:
-        if not args.hyperv.exists(): sys.exit(f"Missing: {args.hyperv}")
+        if not args.hyperv.exists():
+            sys.exit(f"Missing: {args.hyperv}")
         rows.extend(read_hyperv(args.hyperv))
     if args.proxmox:
-        if not args.proxmox.exists(): sys.exit(f"Missing: {args.proxmox}")
+        if not args.proxmox.exists():
+            sys.exit(f"Missing: {args.proxmox}")
         rows.extend(read_proxmox(args.proxmox))
 
     if not rows:

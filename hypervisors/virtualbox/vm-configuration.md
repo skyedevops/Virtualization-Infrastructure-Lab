@@ -55,7 +55,7 @@ VBoxManage storageattach "$NAME" --storagectl "IDE"  --port 0 --device 0 --type 
 
 # 6. Start (headless)
 VBoxManage startvm "$NAME" --type headless
-```
+```text
 
 ## 3. Install Guest Additions
 
@@ -71,7 +71,7 @@ sudo apt install -y build-essential dkms linux-headers-$(uname -r)
 sudo mount /dev/cdrom /mnt
 sudo /mnt/VBoxLinuxAdditions.run
 sudo reboot
-```
+```text
 
 **Windows:**
 
@@ -82,7 +82,7 @@ Verify:
 ```bash
 lsmod | grep vboxguest    # Linux
 # Windows: services.msc -> "VirtualBox Guest Additions Service" Running
-```
+```text
 
 ## 4. Post-Install Tweaks
 
@@ -95,7 +95,7 @@ VBoxManage modifyvm "$NAME" --boot1 disk --boot2 none --boot3 none --boot4 none
 
 # Take baseline snapshot
 VBoxManage snapshot "$NAME" take "clean-baseline" --description "Fresh install $(date -I)"
-```
+```text
 
 ## 5. Linked Clones for Throwaway VMs
 
@@ -109,7 +109,7 @@ VBoxManage clonevm "$NAME" \
   --options link \
   --snapshot "golden" \
   --register
-```
+```text
 
 Linked clones boot in seconds and use ~MB instead of ~GB on disk.
 
@@ -123,7 +123,7 @@ VBoxManage export "$NAME" -o "${NAME}.ova" \
 
 # Import elsewhere
 VBoxManage import "${NAME}.ova" --vsys 0 --vmname "${NAME}-imported"
-```
+```text
 
 ## 7. Headless Operations
 
@@ -132,4 +132,4 @@ VBoxHeadless --startvm "$NAME" --vrde on &           # console via RDP on defaul
 VBoxManage controlvm "$NAME" vrdeport 5000           # change RDP port
 VBoxManage controlvm "$NAME" savestate               # equivalent of suspend-to-disk
 VBoxManage controlvm "$NAME" acpipowerbutton         # graceful shutdown
-```
+```text

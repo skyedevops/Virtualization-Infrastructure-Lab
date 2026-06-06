@@ -14,6 +14,7 @@ between lists as work progresses.
 | **v1.2 - Roadmap** | In progress | this commit |
 | **v1.3 - Diagrams** | Complete | this commit |
 | **v1.4 - Lab-in-a-Box Bootstrap** | Planned | - |
+| **v1.5 - CI for the Scripts** | Complete | this commit |
 | **v2.0 - Multi-Host Proxmox Cluster** | Planned | - |
 | **v2.1 - Proxmox Backup Server** | Planned | - |
 | **v2.2 - Observability Stack** | Planned | - |
@@ -42,10 +43,10 @@ Documentation and reproducibility polish. No new lab hardware.
 - [ ] Test on a clean VM at least once
 
 ### v1.5 - CI for the Scripts
-- [ ] GitHub Actions: bash `shellcheck`, python `ruff`/`pytest`, powershell `PSScriptAnalyzer`
-- [ ] Markdown lint for the docs
-- [ ] PR template that requires the relevant doc be updated when a script changes
-- [ ] All existing scripts passing the linters
+- [x] GitHub Actions: bash `shellcheck`, python `ruff`/`pytest`, powershell `PSScriptAnalyzer`
+- [x] Markdown lint for the docs
+- [x] PR template that requires the relevant doc be updated when a script changes
+- [x] All existing scripts passing the linters
 
 ---
 

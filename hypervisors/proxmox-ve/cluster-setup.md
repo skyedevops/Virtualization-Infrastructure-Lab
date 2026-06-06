@@ -32,14 +32,14 @@ cat /etc/hosts
 qm list
 pct list
 # Both must be empty on the nodes that will *join* the cluster.
-```
+```text
 
 ## 2. Create the Cluster (on the first node only)
 
 ```bash
 pvecm create lab-cluster --link0 10.10.10.11
 pvecm status
-```
+```text
 
 `--link0` pins Corosync to the management IP. Use a dedicated 1+ GbE link if available; you can add a `--link1` for redundancy.
 
@@ -50,14 +50,14 @@ On `pve02`:
 ```bash
 pvecm add 10.10.10.11 --link0 10.10.10.12
 # enter pve01's root password when prompted
-```
+```text
 
 Repeat on `pve03`. Verify:
 
 ```bash
 pvecm nodes
 pvecm status
-```
+```text
 
 You should see `Quorate: Yes` and all nodes listed.
 
@@ -78,7 +78,7 @@ pvesm add nfs shared-nfs \
   --server 10.10.99.20 --export /volume1/pve-shared \
   --content images,iso,backup,vztmpl \
   --options vers=4.1
-```
+```text
 
 VM disks on `shared-nfs` are live-migratable across the cluster with no downtime.
 
@@ -90,7 +90,7 @@ ha-manager add vm:101 --state started --max_restart 3 --max_relocate 2
 
 # Show HA status
 ha-manager status
-```
+```text
 
 If the node hosting VM 101 fails, the cluster reschedules it on a surviving node (assuming the disk is on shared storage).
 
@@ -102,7 +102,7 @@ qm migrate 101 pve02 --online
 
 # Offline
 qm migrate 101 pve02
-```
+```text
 
 GUI: select VM -> Migrate -> pick target node.
 
@@ -113,7 +113,7 @@ pvecm status              # quorum + node list
 corosync-cfgtool -s       # corosync link status
 ha-manager status         # HA resources
 journalctl -u corosync -f # live cluster log
-```
+```text
 
 ## 8. Removing a Node
 
@@ -121,7 +121,7 @@ From any other node:
 
 ```bash
 pvecm delnode pve03
-```
+```text
 
 Then clean up `/etc/pve/nodes/pve03/` if it lingers. Never re-add a removed node without a fresh OS install.
 

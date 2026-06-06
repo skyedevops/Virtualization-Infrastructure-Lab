@@ -35,14 +35,14 @@ Verify the host CPU exposes virtualization extensions before installing any hype
 ```powershell
 Get-ComputerInfo -Property "HyperV*"
 systeminfo | Select-String "Virtualization"
-```
+```text
 
 **Linux:**
 
 ```bash
 egrep -o '(vmx|svm)' /proc/cpuinfo | head -1
 lscpu | grep -i virtualization
-```
+```text
 
 **Result expectations:**
 - `vmx` -> Intel VT-x present

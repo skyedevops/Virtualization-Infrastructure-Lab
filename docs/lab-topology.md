@@ -6,7 +6,7 @@ See [diagrams/physical-topology.md](../diagrams/physical-topology.md)
 for a rendered version of the same layout. The ASCII view is kept
 below for terminal readers and offline viewing.
 
-```
+```text
                     ┌──────────────────┐
                     │   ISP / WAN      │
                     └────────┬─────────┘
@@ -37,7 +37,7 @@ below for terminal readers and offline viewing.
                        │  Admin  │
                        │ Laptop  │
                        └─────────┘
-```
+```text
 
 ## VLAN Topology
 

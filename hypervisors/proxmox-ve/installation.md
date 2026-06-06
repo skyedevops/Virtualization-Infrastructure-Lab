@@ -7,7 +7,7 @@
 
 ```bash
 sudo dd if=proxmox-ve_8.2-1.iso of=/dev/sdX bs=4M status=progress conv=fsync
-```
+```text
 
 ## 2. Boot & Install
 
@@ -41,7 +41,7 @@ Run the bundled script over SSH:
 ssh root@10.10.10.11
 curl -fsSL https://raw.githubusercontent.com/<your-fork>/Virtualization-Infrastructure-Lab/main/hypervisors/proxmox-ve/scripts/pve-post-install.sh -o pve-post-install.sh
 bash pve-post-install.sh
-```
+```text
 
 What it does:
 
@@ -59,7 +59,7 @@ What it does:
 
 ```bash
 pvesm add dir iso --path /var/lib/vz/template/iso --content iso
-```
+```text
 
 ### Add an NFS backup target
 
@@ -69,7 +69,7 @@ pvesm add nfs nas-backup \
   --export /volume1/pve-backup \
   --content backup,vztmpl \
   --options vers=4.1
-```
+```text
 
 ### Create a ZFS pool for VMs (if you didn't choose ZFS at install)
 
@@ -77,7 +77,7 @@ pvesm add nfs nas-backup \
 zpool create -o ashift=12 vmpool mirror /dev/nvme1n1 /dev/nvme2n1
 zfs set compression=lz4 vmpool
 pvesm add zfspool local-zfs --pool vmpool --content images,rootdir --sparse
-```
+```text
 
 ## 6. Network Bridges
 
@@ -98,7 +98,7 @@ iface vmbr0 inet static
     bridge-fd 0
     bridge-vlan-aware yes      # add this line to allow VLAN tags per-VM
     bridge-vids 2-4094
-```
+```text
 
 Add an internal-only bridge for inter-VM traffic that should not leave the host:
 
@@ -109,7 +109,7 @@ iface vmbr1 inet manual
     bridge-stp off
     bridge-fd 0
     bridge-vlan-aware yes
-```
+```text
 
 Apply with `ifreload -a` (after `apt install ifupdown2`).
 
@@ -120,6 +120,6 @@ pveversion -v
 pvesh get /nodes/$(hostname -s)/status
 ip -br link show type bridge
 zpool status
-```
+```text
 
 You're ready to create VMs. Continue with [vm-configuration.md](vm-configuration.md) or jump to [cluster-setup.md](cluster-setup.md) to add more nodes.

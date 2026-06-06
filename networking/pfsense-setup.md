@@ -33,7 +33,7 @@ qm create 100 --name pfsense --memory 2048 --cores 2 \
 qm set 100 --ide2 local:iso/pfSense-CE-2.7.2-RELEASE-amd64.iso,media=cdrom
 qm set 100 --boot order=ide2
 qm start 100
-```
+```text
 
 ## 2. Initial Console Install
 
@@ -136,4 +136,4 @@ ping -c2 10.10.20.10    # AD DNS OK
 ping -c2 1.1.1.1        # internet OK
 nslookup dc01.lab.local # resolves to 10.10.20.10
 traceroute 1.1.1.1      # first hop = pfSense
-```
+```text

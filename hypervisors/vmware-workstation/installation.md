@@ -19,7 +19,7 @@ Disable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All
 Disable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform
 Disable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform
 Restart-Computer
-```
+```text
 
 For Workstation 16+ using the Windows Hypervisor Platform (WHP) backend, Hyper-V can remain enabled.
 
@@ -54,14 +54,14 @@ After launch:
 ```powershell
 vmware -v
 vmrun list
-```
+```text
 
 Expected output:
 
-```
+```text
 VMware Workstation 17.5.x build-xxxxxxxx
 Total running VMs: 0
-```
+```text
 
 ## 5. Recommended Post-Install Tasks
 

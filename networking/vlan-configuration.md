@@ -28,7 +28,7 @@ The lab uses 802.1Q VLAN tagging end-to-end: physical switch trunks, hypervisor 
 
 ```powershell
 Set-VMNetworkAdapterVlan -VMName web01 -Access -VlanId 20
-```
+```text
 
 ### Trunk mode (VM does its own VLAN sub-interfaces)
 
@@ -36,13 +36,13 @@ Set-VMNetworkAdapterVlan -VMName web01 -Access -VlanId 20
 Set-VMNetworkAdapterVlan -VMName pfSense `
                          -Trunk -AllowedVlanIdList 10,20,30,40,99 `
                          -NativeVlanId 0
-```
+```text
 
 ### Verify
 
 ```powershell
 Get-VMNetworkAdapterVlan -VMName *
-```
+```text
 
 ## Proxmox VLAN
 
@@ -53,19 +53,19 @@ Get-VMNetworkAdapterVlan -VMName *
 ```conf
 bridge-vlan-aware yes
 bridge-vids 2-4094
-```
+```text
 
 ### Per-VM access VLAN
 
 ```bash
 qm set 101 --net0 virtio,bridge=vmbr0,tag=20
-```
+```text
 
 ### Per-VM trunk (for a router VM like pfSense)
 
 ```bash
 qm set 200 --net0 virtio,bridge=vmbr0,trunks=10;20;30;40;99
-```
+```text
 
 Inside pfSense (or any guest), configure sub-interfaces per VLAN ID.
 
@@ -93,7 +93,7 @@ network:
           via: 10.10.20.1
       nameservers:
         addresses: [10.10.20.10]
-```
+```text
 
 ## VMware Workstation VLAN
 
@@ -109,7 +109,7 @@ sudo modprobe 8021q
 sudo ip link add link ens33 name ens33.20 type vlan id 20
 sudo ip addr add 10.10.20.50/24 dev ens33.20
 sudo ip link set ens33.20 up
-```
+```text
 
 ## VirtualBox VLAN
 

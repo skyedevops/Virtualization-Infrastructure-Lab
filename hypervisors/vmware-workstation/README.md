@@ -42,7 +42,7 @@ vmrun list
 
 # Run a command inside a guest (requires VMware Tools)
 vmrun -gu root -gp <password> runProgramInGuest "D:\VMs\ubuntu-22.vmx" /usr/bin/uptime
-```
+```text
 
 ## Best Practices Used in This Lab
 

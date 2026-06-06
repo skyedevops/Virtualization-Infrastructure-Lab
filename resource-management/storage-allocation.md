@@ -22,7 +22,7 @@
 
 ## Recommended Layout
 
-```
+```text
 Hypervisor host
 +-- Tier 0 NVMe                 # OS + active VM disks
 |   +-- /var/lib/vz (Proxmox)
@@ -31,7 +31,7 @@ Hypervisor host
 |   +-- /mnt/ssd, E:\ISOs
 +-- Tier 2 HDD or NAS           # backups, archive
     +-- /mnt/backup, \\nas\backup
-```
+```text
 
 ## Storage Backends per Hypervisor
 
@@ -50,7 +50,7 @@ Resize-VHD -Path "D:\VMs\db01\db01.vhdx" -SizeBytes 150GB
 
 # Compact a dynamic VHDX (offline)
 Optimize-VHD -Path "D:\VMs\test01\test01.vhdx" -Mode Full
-```
+```text
 
 ### Proxmox / KVM
 
@@ -73,7 +73,7 @@ sudo fstrim -av
 
 # Trim from the host on LVM-thin
 lvs -a -o +discard
-```
+```text
 
 ### VMware Workstation
 
@@ -89,16 +89,16 @@ vmware-vdiskmanager -x 60GB "D:\VMs\web01\web01.vmdk"
 
 # Convert split to single file
 vmware-vdiskmanager -r "D:\VMs\web01\web01.vmdk" -t 0 "D:\VMs\web01\web01-single.vmdk"
-```
+```text
 
 `.vmx` performance flags:
 
-```
+```text
 scsi0:0.virtualSSD = "1"           # advertise as SSD to guest (Win disables defrag)
 mainMem.useNamedFile = "FALSE"     # don't write swap to host disk for VM RAM
 diskLib.dataCacheMaxSize = "32768" # KB read cache (default 0)
 diskLib.dataCachePageSize = "4096"
-```
+```text
 
 ### VirtualBox
 
@@ -111,7 +111,7 @@ VBoxManage modifymedium disk "$HOME/VirtualBox VMs/web01/web01.vdi" --resize 600
 
 # Convert VMDK -> VDI
 VBoxManage clonemedium disk "input.vmdk" "output.vdi" --format VDI
-```
+```text
 
 ## Performance Best Practices
 
@@ -136,7 +136,7 @@ lvs -a -o +data_percent
 
 # Per-VM (Proxmox)
 qm list | awk 'NR>1 {print $1}' | xargs -I{} qm config {} | grep -E '^(name|scsi|virtio|ide)'
-```
+```text
 
 Set alerts when:
 

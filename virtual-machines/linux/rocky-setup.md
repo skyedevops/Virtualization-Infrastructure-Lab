@@ -43,7 +43,7 @@ sudo dnf -y install \
 
 sudo timedatectl set-timezone UTC
 sudo systemctl enable --now chronyd firewalld
-```
+```text
 
 ## 3. SELinux + Firewall
 
@@ -61,7 +61,7 @@ sudo firewall-cmd --permanent --add-service=ssh
 # sudo firewall-cmd --permanent --add-service=https
 sudo firewall-cmd --reload
 sudo firewall-cmd --list-all
-```
+```text
 
 ## 4. Static IP via NetworkManager
 
@@ -75,7 +75,7 @@ sudo nmcli con mod "$NIC" \
   ipv4.method manual
 sudo nmcli con down "$NIC" && sudo nmcli con up "$NIC"
 ip a; ip r; resolvectl status
-```
+```text
 
 ## 5. SSH Hardening
 
@@ -90,7 +90,7 @@ sudo sed -ri \
   -e 's|^#?PasswordAuthentication.*|PasswordAuthentication no|' \
   /etc/ssh/sshd_config
 sudo systemctl reload sshd
-```
+```text
 
 ## 6. Auto-Updates
 
@@ -100,7 +100,7 @@ sudo sed -ri \
   -e 's|^upgrade_type.*|upgrade_type = security|' \
   -e 's|^apply_updates.*|apply_updates = yes|' \
   /etc/dnf/automatic.conf
-```
+```text
 
 ## 7. Optional Cockpit Web Console
 
@@ -109,7 +109,7 @@ sudo systemctl enable --now cockpit.socket
 sudo firewall-cmd --permanent --add-service=cockpit
 sudo firewall-cmd --reload
 # Browse to https://<ip>:9090
-```
+```text
 
 ## 8. Snapshot
 
@@ -125,4 +125,4 @@ sudo dnf clean all
 sudo rm -rf /var/cache/dnf
 history -c
 sudo shutdown -h now
-```
+```text

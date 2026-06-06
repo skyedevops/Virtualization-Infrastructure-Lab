@@ -32,7 +32,7 @@ This lab was built to gain practical, production-grade experience with the major
 
 ## Lab Topology
 
-```
+```text
                        Internet / WAN
                             |
                      +------+------+
@@ -53,7 +53,7 @@ This lab was built to gain practical, production-grade experience with the major
         | Linux VMs| | WinSrv | | Mixed    |
         | LXC      | | AD/DNS | | Guests   |
         +----------+ +--------+ +----------+
-```
+```text
 
 See [docs/lab-topology.md](docs/lab-topology.md) for the full network and storage topology.
 
@@ -61,7 +61,7 @@ See [docs/lab-topology.md](docs/lab-topology.md) for the full network and storag
 
 ## Repository Structure
 
-```
+```text
 .
 ├── docs/                        # Architecture, hardware, topology
 ├── hypervisors/
@@ -80,7 +80,7 @@ See [docs/lab-topology.md](docs/lab-topology.md) for the full network and storag
 │   ├── bash/                    # Proxmox / Linux automation
 │   └── python/                  # Cross-platform tooling
 └── diagrams/                    # Network and architecture diagrams
-```
+```text
 
 ---
 

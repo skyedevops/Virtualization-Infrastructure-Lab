@@ -49,7 +49,7 @@ flowchart LR
     class Pbs tier2
     class Cloud tier3
     class R1,R2,R3,R4 tier4
-```
+```text
 
 ## Three Independent Copy Paths
 

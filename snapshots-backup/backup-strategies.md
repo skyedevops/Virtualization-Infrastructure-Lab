@@ -30,7 +30,7 @@ pvesm add pbs pbs01 \
   --username root@pam \
   --password '<token>' \
   --fingerprint '<sha256>'
-```
+```text
 
 ### Datacenter > Backup job (UI) or `/etc/pve/jobs.cfg`
 
@@ -44,13 +44,13 @@ vzdump: lab-nightly
         prune-backups keep-last=3,keep-daily=7,keep-weekly=4,keep-monthly=6
         mailnotification failure
         mailto root
-```
+```text
 
 Or run ad hoc:
 
 ```bash
 bash /workspaces/Virtualization-Infrastructure-Lab/hypervisors/proxmox-ve/scripts/backup-all-vms.sh
-```
+```text
 
 ## Hyper-V - Export + Windows Server Backup
 
@@ -62,7 +62,7 @@ Register-ScheduledJob -Name "Backup-Lab-VMs" `
       & "C:\Scripts\Backup-VMCheckpoints.ps1" -ExportPath "E:\Exports" -RetainDays 7
   } `
   -Trigger (New-JobTrigger -Daily -At "02:30")
-```
+```text
 
 ### Application-aware (Windows Server Backup)
 
@@ -78,7 +78,7 @@ $target = New-WBBackupTarget -NetworkPath "\\nas.lab.local\backup\hyperv01"
 Add-WBBackupTarget   -Policy $policy -Target $target
 Set-WBSchedule       -Policy $policy -Schedule "01:00"
 Set-WBPolicy         -Policy $policy
-```
+```text
 
 ## VMware Workstation - File-Level + Optional Veeam Agent
 
@@ -94,7 +94,7 @@ $Source = "D:\VMs"
 $Dest   = "\\nas.lab.local\backup\workstation"
 $Today  = (Get-Date -f yyyyMMdd)
 robocopy $Source "$Dest\$Today" /MIR /MT:16 /R:1 /W:5 /LOG:"$env:TEMP\vmware-backup-$Today.log"
-```
+```text
 
 ## VirtualBox - Export to OVA
 
@@ -106,7 +106,7 @@ for VM in $(VBoxManage list vms | awk -F\" '{print $2}'); do
     VBoxManage controlvm "$VM" savestate 2>/dev/null || true
     VBoxManage export "$VM" -o "$DEST/${VM}.ova" --manifest
 done
-```
+```text
 
 ## In-Guest Linux - restic
 
@@ -117,7 +117,7 @@ sudo restic backup -r b2:lab-bucket:/restic /etc /home /var/log /var/lib/postgre
   --exclude /var/lib/postgresql/*/*/log
 sudo restic -r b2:lab-bucket:/restic forget --prune \
   --keep-daily 7 --keep-weekly 4 --keep-monthly 6
-```
+```text
 
 Run via systemd timer (`restic-backup.timer`, `OnCalendar=*-*-* 03:30:00`).
 
@@ -129,7 +129,7 @@ wbadmin start backup `
   -backupTarget:\\nas.lab.local\backup\$env:COMPUTERNAME `
   -include:C: `
   -allCritical -quiet
-```
+```text
 
 ## Off-site (Cloud)
 
@@ -144,7 +144,7 @@ rclone sync /mnt/backup/proxmox b2lab:lab-bucket/proxmox \
   --backup-dir b2lab:lab-bucket/proxmox-history/$(date +%Y%m%d) \
   --transfers 4 --bwlimit 5M --b2-hard-delete \
   --log-file /var/log/rclone-offsite.log -v
-```
+```text
 
 Lifecycle on B2: rules to roll backups older than 90 days into Glacier, hard-delete after 1 year.
 

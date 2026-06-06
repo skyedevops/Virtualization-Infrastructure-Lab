@@ -1,0 +1,135 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Bash scripts: shellcheck + bash -n
+  # ---------------------------------------------------------------------------
+  bash:
+    name: Bash (${{ matrix.script }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        script:
+          - hypervisors/proxmox-ve/scripts/pve-post-install.sh
+          - hypervisors/proxmox-ve/scripts/create-vm-from-cloudimg.sh
+          - hypervisors/proxmox-ve/scripts/snapshot-rotate.sh
+          - hypervisors/proxmox-ve/scripts/backup-all-vms.sh
+          - scripts/bash/vm-inventory.sh
+          - scripts/bash/lab-health.sh
+          - virtual-machines/linux/scripts/linux-vm-postinstall.sh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        uses: ludeeus/action-shellcheck@2.0.0
+        with:
+          scandir: ./${{ matrix.script }}
+          additional_files: ${{ matrix.script }}
+          ignore_paths: tests/
+
+      - name: bash -n syntax check
+        shell: bash
+        run: bash -n "${{ matrix.script }}"
+
+  # ---------------------------------------------------------------------------
+  # Python scripts: ruff + py_compile + pytest (when tests exist)
+  # ---------------------------------------------------------------------------
+  python:
+    name: Python (${{ matrix.script }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        script:
+          - hypervisors/proxmox-ve/scripts/pve-api-example.py
+          - scripts/python/multi-hypervisor-report.py
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: pip install
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: ruff lint
+        run: ruff check ${{ matrix.script }}
+
+      - name: syntax check
+        run: python -m py_compile ${{ matrix.script }}
+
+  # ---------------------------------------------------------------------------
+  # PowerShell scripts: PSScriptAnalyzer + parser
+  # ---------------------------------------------------------------------------
+  powershell:
+    name: PowerShell (${{ matrix.script }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        script:
+          - hypervisors/hyper-v/scripts/Enable-HyperVRole.ps1
+          - hypervisors/hyper-v/scripts/New-VMSwitch-Lab.ps1
+          - hypervisors/hyper-v/scripts/New-LabVM.ps1
+          - hypervisors/hyper-v/scripts/Backup-VMCheckpoints.ps1
+          - hypervisors/hyper-v/scripts/Restore-VMFromExport.ps1
+          - scripts/powershell/Get-LabInventory.ps1
+          - scripts/powershell/Invoke-LabPowerControl.ps1
+          - virtual-machines/windows/scripts/windows-vm-postinstall.ps1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSScriptAnalyzer -Force -SkipPublisherCheck -Scope CurrentUser
+
+      - name: Parser check
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+              "${{ matrix.script }}", [ref]$tokens, [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Output
+              exit 1
+          }
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Invoke-ScriptAnalyzer -Path "${{ matrix.script }}" `
+                                -Severity Warning,Error `
+                                -ExcludeRule PSAvoidUsingPositionalParameters `
+                                | Format-Table -AutoSize
+          $issues = Invoke-ScriptAnalyzer -Path "${{ matrix.script }}" -Severity Error
+          if ($issues) { exit 1 }
+
+  # ---------------------------------------------------------------------------
+  # Markdown lint
+  # ---------------------------------------------------------------------------
+  markdown:
+    name: Markdown lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v19
+        with:
+          globs: |
+            **/*.md
+          config: .markdownlint.jsonc

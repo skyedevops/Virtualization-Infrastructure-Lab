@@ -37,7 +37,7 @@ sudo apt update
 sudo apt install -y virtualbox-7.0
 sudo usermod -aG vboxusers $USER
 newgrp vboxusers
-```
+```text
 
 ### Linux (Fedora/RHEL)
 
@@ -45,7 +45,7 @@ newgrp vboxusers
 sudo dnf install -y kernel-devel-$(uname -r) dkms
 sudo dnf install -y https://download.virtualbox.org/virtualbox/rpm/el/oracle-virtualbox-2016.repo
 sudo dnf install -y VirtualBox-7.0
-```
+```text
 
 ## 3. Extension Pack
 
@@ -54,7 +54,7 @@ VERSION=$(VBoxManage --version | cut -d'r' -f1)
 wget "https://download.virtualbox.org/virtualbox/${VERSION}/Oracle_VM_VirtualBox_Extension_Pack-${VERSION}.vbox-extpack"
 sudo VBoxManage extpack install "Oracle_VM_VirtualBox_Extension_Pack-${VERSION}.vbox-extpack"
 VBoxManage list extpacks
-```
+```text
 
 The Extension Pack is licensed under PUEL (free for personal/eval/academic, paid for commercial).
 
@@ -69,7 +69,7 @@ VBoxManage setproperty machinefolder "D:\VBoxVMs"
 
 # Default VRDE library (free; for RDP-style console)
 VBoxManage setproperty vrdeauthlibrary default
-```
+```text
 
 ## 5. Networking Defaults
 
@@ -78,14 +78,14 @@ Verify the host-only adapter exists:
 ```bash
 VBoxManage list hostonlyifs
 # Expect: vboxnet0 (Linux/macOS) or 'VirtualBox Host-Only Ethernet Adapter' (Windows)
-```
+```text
 
 If missing, create one:
 
 ```bash
 VBoxManage hostonlyif create
 VBoxManage hostonlyif ipconfig vboxnet0 --ip 192.168.56.1 --netmask 255.255.255.0
-```
+```text
 
 Create a NAT Network for multi-VM labs that need internet + inter-VM traffic:
 
@@ -93,7 +93,7 @@ Create a NAT Network for multi-VM labs that need internet + inter-VM traffic:
 VBoxManage natnetwork add --netname LabNet \
   --network "10.10.50.0/24" --dhcp on --ipv6 off
 VBoxManage natnetwork start --netname LabNet
-```
+```text
 
 ## 6. Validation
 
@@ -102,4 +102,4 @@ VBoxManage --version
 VBoxManage list extpacks
 VBoxManage list hostonlyifs
 VBoxManage list natnetworks
-```
+```text

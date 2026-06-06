@@ -42,7 +42,7 @@ Set-VMProcessor -VMName web01 -CompatibilityForMigrationEnabled $true
 
 # NUMA spanning (default on, disable for NUMA-sensitive workloads)
 Set-VMHost -NumaSpanningEnabled $false
-```
+```text
 
 ### Proxmox / KVM
 
@@ -56,7 +56,7 @@ qm set 101 --affinity 0-3
 # Limit / weight
 qm set 101 --cpulimit 2.0      # cap at 2 cores of CPU time
 qm set 101 --cpuunits 1024     # relative weight (default 1024)
-```
+```text
 
 `--cpu host` exposes every CPU flag (best perf), but blocks live migration to a host with a different CPU. Use `--cpu kvm64` or a named model (e.g. `--cpu Cascadelake-Server`) when migration matters.
 
@@ -69,13 +69,13 @@ In **VM Settings -> Processors**:
 
 `.vmx` keys:
 
-```
+```text
 numvcpus = "4"
 cpuid.coresPerSocket = "2"
 sched.cpu.min = "0"          # reservation MHz
 sched.cpu.max = "0"          # cap MHz (0 = no cap)
 sched.cpu.shares = "normal"  # low | normal | high | <int>
-```
+```text
 
 ### VirtualBox
 
@@ -84,7 +84,7 @@ VBoxManage modifyvm "web01" --cpus 4 --cpuhotplug on
 VBoxManage modifyvm "web01" --cpu-profile host          # expose host CPU
 VBoxManage modifyvm "web01" --cpuexecutioncap 80        # 80% of one core
 VBoxManage modifyvm "web01" --paravirtprovider kvm      # for Linux guests
-```
+```text
 
 ## CPU Tuning Best Practices
 

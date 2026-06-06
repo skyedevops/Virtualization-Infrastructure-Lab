@@ -13,6 +13,7 @@ while getopts "o:h" opt; do
   case $opt in
     o) OUT="$OPTARG" ;;
     h) echo "Usage: $0 [-o output.csv]"; exit 0 ;;
+    *) echo "Unknown flag: -$OPTARG" >&2; exit 2 ;;
   esac
 done
 

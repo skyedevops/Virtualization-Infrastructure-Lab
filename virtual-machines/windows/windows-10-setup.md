@@ -58,7 +58,7 @@ foreach ($a in $apps) {
   Get-AppxPackage -Name $a -AllUsers | Remove-AppxPackage -ErrorAction SilentlyContinue
   Get-AppxProvisionedPackage -Online | Where-Object DisplayName -EQ $a | Remove-AppxProvisionedPackage -Online
 }
-```
+```text
 
 ## 3. Install RSAT (Admin Tools)
 
@@ -66,7 +66,7 @@ foreach ($a in $apps) {
 Get-WindowsCapability -Name RSAT* -Online | `
   Where-Object State -ne Installed | `
   Add-WindowsCapability -Online
-```
+```text
 
 Now Active Directory Users & Computers, DNS, DHCP, Hyper-V Manager, etc., are available on the client.
 
@@ -76,7 +76,7 @@ Now Active Directory Users & Computers, DNS, DHCP, Hyper-V Manager, etc., are av
 Add-Computer -DomainName "lab.local" `
              -Credential (Get-Credential LAB\labadmin) `
              -Restart
-```
+```text
 
 ## 5. Install Standard Developer / Admin Tools (winget)
 
@@ -90,7 +90,7 @@ winget install --id WiresharkFoundation.Wireshark        -e
 winget install --id Putty.Putty                          -e
 winget install --id 7zip.7zip                            -e
 winget install --id Mozilla.Firefox                      -e
-```
+```text
 
 ## 6. BitLocker (optional)
 
@@ -101,7 +101,7 @@ Enable-BitLocker -MountPoint "C:" `
                  -TpmProtector
 Add-BitLockerKeyProtector -MountPoint "C:" -RecoveryPasswordProtector
 manage-bde -protectors -get C:
-```
+```text
 
 > Recovery key is written to AD if the host is domain-joined (with the right GPO) - test recovery before relying on it.
 

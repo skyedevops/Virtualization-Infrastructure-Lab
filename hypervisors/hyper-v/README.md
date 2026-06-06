@@ -57,7 +57,7 @@ Checkpoint-VM -Name dc01 -SnapshotName "pre-patch-$(Get-Date -f yyyyMMdd)"
 Get-VMSnapshot -VMName dc01
 Restore-VMSnapshot -Name "pre-patch-20260101" -VMName dc01 -Confirm:$false
 Remove-VMSnapshot  -Name "pre-patch-20260101" -VMName dc01
-```
+```text
 
 ## Featured Scripts (this repo)
 

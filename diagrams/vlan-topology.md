@@ -60,7 +60,7 @@ flowchart LR
     class WinA,LinA,Pfsense30 client
     class Web,RP,Pfsense40 dmz
     class NAS,PBS,Pfsense99 storage
-```
+```text
 
 ## Routing & Firewall Summary
 

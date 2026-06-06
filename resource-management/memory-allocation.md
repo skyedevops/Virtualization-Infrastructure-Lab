@@ -23,7 +23,7 @@ Set-VMMemory -VMName web01 `
              -MaximumBytes  4GB `
              -Buffer 20 `
              -Priority 50
-```
+```text
 
 - **StartupBytes**: required at power-on (must be available)
 - **MinimumBytes**: can be reclaimed down to this floor
@@ -46,7 +46,7 @@ qm set 101 --memory 4096 --balloon 1024
 
 # Enable KSM (host-side, /etc/default/ksmtuned)
 systemctl enable --now ksmtuned
-```
+```text
 
 Verify balloon driver inside the guest:
 
@@ -56,18 +56,18 @@ lsmod | grep balloon
 free -m
 
 # Windows: virtio-balloon driver from virtio-win ISO + Services -> "VirtIO Balloon"
-```
+```text
 
 ### VMware Workstation
 
-```
+```text
 memsize = "4096"
 sched.mem.min = "1024"          # reservation MB
 sched.mem.minSize = "2048"      # min on resume
 sched.mem.maxSize = "8192"      # cap
 sched.mem.shares = "normal"
 mem.hotadd = "TRUE"
-```
+```text
 
 GUI: VM Settings -> Memory + Memory limit slider.
 
@@ -79,7 +79,7 @@ VirtualBox does not over-commit memory - allocation is fixed at VM start.
 VBoxManage modifyvm "web01" --memory 4096 --vram 64
 # Optional: page fusion (KSM-like, Windows hosts only)
 VBoxManage modifyvm "web01" --pagefusion on
-```
+```text
 
 ## Sizing Heuristics
 
@@ -111,7 +111,7 @@ ZFS ARC tuning on Proxmox:
 echo "options zfs zfs_arc_max=4294967296" > /etc/modprobe.d/zfs.conf   # 4 GB
 update-initramfs -u -k all
 reboot
-```
+```text
 
 ## Monitoring Memory Pressure
 

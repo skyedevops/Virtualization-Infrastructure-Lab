@@ -9,7 +9,7 @@ Cheat sheet for creating and inspecting virtual switches/bridges in each hypervi
 ```powershell
 # Windows PowerShell
 Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*VMware*"}
-```
+```text
 
 GUI: **Edit -> Virtual Network Editor** (must run as Administrator).
 
@@ -24,19 +24,19 @@ CLI (Linux host):
 
 ```bash
 sudo vmware-netcfg
-```
+```text
 
 ### Attach VM to a switch
 
 `.vmx` snippet:
 
-```
+```text
 ethernet0.present = "TRUE"
 ethernet0.connectionType = "custom"
 ethernet0.vnet = "VMnet2"
 ethernet0.virtualDev = "vmxnet3"
 ethernet0.addressType = "generated"
-```
+```text
 
 ---
 
@@ -57,7 +57,7 @@ New-VMSwitch -Name "vSwitch-Internal" -SwitchType Internal
 
 # Private - VM-to-VM only on this host
 New-VMSwitch -Name "vSwitch-Private" -SwitchType Private
-```
+```text
 
 ### Attach a VM NIC
 
@@ -70,13 +70,13 @@ Set-VMNetworkAdapterVlan  -VMName web01 -Access -VlanId 20
 Set-VMNetworkAdapter -VMName web01 -Name lan `
                      -MinimumBandwidthAbsolute 10MB `
                      -MaximumBandwidth        100MB
-```
+```text
 
 ### Allow MAC spoofing (needed for nested labs)
 
 ```powershell
 Set-VMNetworkAdapter -VMName nested-pve -MacAddressSpoofing On
-```
+```text
 
 ---
 
@@ -88,7 +88,7 @@ Set-VMNetworkAdapter -VMName nested-pve -MacAddressSpoofing On
 ip -br link show type bridge
 brctl show              # legacy but informative
 cat /etc/network/interfaces
-```
+```text
 
 ### Add a VLAN-aware bridge (in `/etc/network/interfaces`)
 
@@ -100,7 +100,7 @@ iface vmbr1 inet manual
     bridge-fd 0
     bridge-vlan-aware yes
     bridge-vids 2-4094
-```
+```text
 
 Apply: `ifreload -a` (needs `apt install ifupdown2`).
 
@@ -108,7 +108,7 @@ Apply: `ifreload -a` (needs `apt install ifupdown2`).
 
 ```bash
 qm set 101 --net1 virtio,bridge=vmbr0,tag=20
-```
+```text
 
 ### Linux bond + bridge example (LACP)
 
@@ -126,7 +126,7 @@ iface vmbr0 inet static
     gateway 10.10.10.1
     bridge-ports bond0
     bridge-vlan-aware yes
-```
+```text
 
 ### OVS bridge (alternative)
 
@@ -137,7 +137,7 @@ auto vmbr0
 iface vmbr0 inet manual
     ovs_type OVSBridge
     ovs_ports enp1s0
-```
+```text
 
 ---
 
@@ -150,21 +150,21 @@ VBoxManage list hostonlyifs
 VBoxManage list natnetworks
 VBoxManage list bridgedifs
 VBoxManage list intnets
-```
+```text
 
 ### Create a NAT Network
 
 ```bash
 VBoxManage natnetwork add --netname LabNet --network "10.10.50.0/24" --dhcp on
 VBoxManage natnetwork start --netname LabNet
-```
+```text
 
 ### Create a host-only adapter with an IP
 
 ```bash
 VBoxManage hostonlyif create
 VBoxManage hostonlyif ipconfig vboxnet1 --ip 192.168.57.1 --netmask 255.255.255.0
-```
+```text
 
 ### Attach NICs to a VM
 
@@ -173,7 +173,7 @@ VBoxManage modifyvm "ubuntu-01" \
   --nic1 natnetwork --nat-network1 LabNet --nictype1 virtio \
   --nic2 hostonly --hostonlyadapter2 vboxnet0 --nictype2 virtio \
   --nic3 intnet   --intnet3 "isolated-test" --nictype3 virtio
-```
+```text
 
 ### Port forward (NAT mode only, single VM)
 
@@ -181,7 +181,7 @@ VBoxManage modifyvm "ubuntu-01" \
 VBoxManage modifyvm "ubuntu-01" \
   --natpf1 "ssh,tcp,,2222,,22" \
   --natpf1 "http,tcp,,8080,,80"
-```
+```text
 
 ---
 

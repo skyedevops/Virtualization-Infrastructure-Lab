@@ -25,8 +25,8 @@ command -v sudo >/dev/null || fatal "sudo not installed."
 # Detect distro family
 . /etc/os-release
 case "${ID_LIKE:-$ID}" in
-  *debian*|debian|ubuntu) FAMILY=debian ;;
-  *rhel*|*fedora*|rhel|fedora|rocky|almalinux|centos) FAMILY=rhel ;;
+  *debian*|*ubuntu*) FAMILY=debian ;;
+  *rhel*|*fedora*|*rocky*|*almalinux*|*centos*) FAMILY=rhel ;;
   *) fatal "Unsupported distro: $ID" ;;
 esac
 ok "Detected family: $FAMILY ($PRETTY_NAME)"
@@ -62,7 +62,7 @@ ok "Packages installed"
 # ------------------------------------------------------------------
 step "SSH hardening"
 SSHD=/etc/ssh/sshd_config
-sudo cp $SSHD ${SSHD}.bak.$(date +%s)
+sudo cp "$SSHD" "${SSHD}.bak.$(date +%s)"
 
 # Add SSH key if provided
 if [[ -n $SSH_PUBKEY ]]; then

@@ -56,7 +56,7 @@ Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 # Enable PSRemoting
 Enable-PSRemoting -Force
 Set-Item WSMan:\localhost\Service\AllowUnencrypted $false
-```
+```text
 
 ## 3. Install Updates
 
@@ -65,7 +65,7 @@ Install-Module PSWindowsUpdate -Force -Confirm:$false
 Import-Module PSWindowsUpdate
 Get-WindowsUpdate
 Install-WindowsUpdate -AcceptAll -AutoReboot
-```
+```text
 
 ## 4. Promote to Domain Controller (optional, for `dc01`)
 
@@ -84,7 +84,7 @@ Install-ADDSForest `
   -SafeModeAdministratorPassword (Read-Host -AsSecureString "DSRM password") `
   -Force
 # Server reboots automatically into a DC role
-```
+```text
 
 After reboot:
 
@@ -102,7 +102,7 @@ Add-DhcpServerv4Scope -Name "Clients" `
   -SubnetMask 255.255.255.0 -State Active
 Set-DhcpServerv4OptionValue -ScopeId 10.10.30.0 `
   -Router 10.10.30.1 -DnsServer 10.10.20.10 -DnsDomain "lab.local"
-```
+```text
 
 ## 5. Hardening Baseline
 
@@ -128,7 +128,7 @@ New-NetFirewallRule -DisplayName "Block-NetBIOS" -Direction Inbound -Protocol TC
 # Enable Windows Defender + Controlled Folder Access
 Set-MpPreference -EnableControlledFolderAccess Enabled
 Set-MpPreference -PUAProtection Enabled
-```
+```text
 
 ## 6. Hypervisor Integration
 
@@ -148,7 +148,7 @@ Take a hypervisor-level snapshot named `clean-baseline` once the server is patch
 ```powershell
 # From an elevated PowerShell:
 C:\Windows\System32\Sysprep\sysprep.exe /generalize /oobe /shutdown /unattend:C:\unattend.xml
-```
+```text
 
 Sample minimal `unattend.xml`:
 
@@ -174,4 +174,4 @@ Sample minimal `unattend.xml`:
     </component>
   </settings>
 </unattend>
-```
+```text

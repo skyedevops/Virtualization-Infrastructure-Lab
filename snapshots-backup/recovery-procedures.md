@@ -4,7 +4,7 @@ This document is the lab's **DR runbook**. Treat each section as a checklist you
 
 ## Recovery Decision Tree
 
-```
+```text
 Is the VM running but misbehaving?
   +--> Rollback to last good snapshot (sub-second)         [Scenario 1]
 
@@ -16,7 +16,7 @@ Is the hypervisor host dead?
 
 Is the entire site lost (fire/theft/flood)?
   +--> Off-site restore on new hardware                     [Scenario 4]
-```
+```text
 
 ---
 
@@ -49,7 +49,7 @@ qmrestore pbs01:backup/vm/101/2026-01-31T02:00:00Z 101 --storage local-lvm
 qmrestore pbs01:backup/vm/101/2026-01-31T02:00:00Z 999 --storage local-lvm
 qm set 999 --name web01-restored
 qm start 999
-```
+```text
 
 ### Hyper-V from Export
 
@@ -60,7 +60,7 @@ qm start 999
    -SwitchName "vSwitch-Internal" `
    -CopyFiles
 Start-VM -Name dc01-restored
-```
+```text
 
 ### VMware Workstation from filesystem copy
 
@@ -68,14 +68,14 @@ Start-VM -Name dc01-restored
 robocopy "\\nas\backup\workstation\20260131\web01" "D:\VMs\web01" /MIR /MT:16
 # Open the .vmx in Workstation -> "I Copied It" when prompted for UUID
 vmrun start "D:\VMs\web01\web01.vmx" nogui
-```
+```text
 
 ### VirtualBox from OVA
 
 ```bash
 VBoxManage import /mnt/backup/vbox/20260131/web01.ova --vsys 0 --vmname web01-restored
 VBoxManage startvm web01-restored --type headless
-```
+```text
 
 **Time budget**: 10-30 minutes depending on VM size + network.
 
@@ -136,7 +136,7 @@ dcdiag /v /c
 repadmin /replsummary
 nslookup dc01.lab.local
 nslookup -type=SRV _ldap._tcp.lab.local
-```
+```text
 
 ### File Server (fs01)
 
@@ -144,7 +144,7 @@ nslookup -type=SRV _ldap._tcp.lab.local
 Get-SmbShare
 Test-Path "\\fs01\public"
 Get-SmbConnection
-```
+```text
 
 ### pfSense
 
@@ -175,6 +175,6 @@ After each drill or real recovery, append to `recovery-drills.md`:
 - RTO actual: Xm  (target: Ym)
 - RPO actual: X h  (target: Y h)
 - Action items: ...
-```
+```text
 
 Reviewing the drill log quarterly is where most of the runbook improvements come from.

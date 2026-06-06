@@ -45,7 +45,7 @@ VBoxManage snapshot "ubuntu-01" delete    "pre-update"
 # Clone
 VBoxManage clonevm "golden-ubuntu" --name "test-01" --register \
   --options link --snapshot "golden"
-```
+```text
 
 ## When to Use VirtualBox
 
@@ -70,11 +70,11 @@ Vagrant.configure("2") do |config|
   end
   config.vm.provision "shell", inline: "apt-get update && apt-get install -y nginx"
 end
-```
+```text
 
 ```bash
 vagrant up
 vagrant ssh
 vagrant halt
 vagrant destroy -f
-```
+```text

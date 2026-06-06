@@ -28,7 +28,7 @@ This guide walks through building a production-style Linux VM from ISO. The same
 
 Edit the `.vmx` file directly with the VM powered off to add:
 
-```
+```text
 # Disable annoying CPU mitigations on isolated lab VMs (improves perf)
 ulm.disableMitigations = "TRUE"
 
@@ -45,7 +45,7 @@ vpmc.enable = "TRUE"
 # Disk performance
 scsi0:0.virtualSSD = "1"        # advertise as SSD to guest
 mainMem.useNamedFile = "FALSE"  # reduce host disk thrash
-```
+```text
 
 ## 3. Install Guest OS
 
@@ -65,14 +65,14 @@ mainMem.useNamedFile = "FALSE"  # reduce host disk thrash
 sudo apt update
 sudo apt install -y open-vm-tools open-vm-tools-desktop
 sudo systemctl enable --now open-vm-tools
-```
+```text
 
 **Linux (RHEL / Rocky / CentOS):**
 
 ```bash
 sudo dnf install -y open-vm-tools
 sudo systemctl enable --now vmtoolsd
-```
+```text
 
 **Windows:**
 
@@ -82,7 +82,7 @@ Verify:
 
 ```bash
 vmware-toolbox-cmd -v
-```
+```text
 
 ## 5. Post-Install Baseline
 
@@ -117,6 +117,6 @@ vmrun clone "D:\VMs\golden-ubuntu\golden-ubuntu.vmx" \
             linked \
             -snapshot=golden \
             -cloneName=test-01
-```
+```text
 
 Linked clones share the parent's base disk and only store deltas, saving 80-95% of disk space for short-lived VMs.

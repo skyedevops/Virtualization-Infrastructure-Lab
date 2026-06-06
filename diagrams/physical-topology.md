@@ -34,7 +34,7 @@ flowchart TB
     class Pfsense,Hyperv,Proxmox,Workstation mgmt
     class Admin vm
     class NAS backup
-```
+```text
 
 ## Notes
 

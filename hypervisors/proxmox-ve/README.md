@@ -75,7 +75,7 @@ pvecm nodes
 
 # Backup
 vzdump 101 --storage local --mode snapshot --compress zstd
-```
+```text
 
 ## Featured Scripts (this repo)
 

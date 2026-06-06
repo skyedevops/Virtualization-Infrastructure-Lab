@@ -63,7 +63,7 @@ Set-VM -Name $VMName `
        -CheckpointType Production    # crash-consistent, app-aware
 
 Start-VM -Name $VMName
-```
+```text
 
 Or use the bundled script:
 
@@ -72,7 +72,7 @@ Or use the bundled script:
                         -CPU 4 -MemoryGB 4 -DiskGB 80 `
                         -SwitchName vSwitch-Internal `
                         -IsoPath D:\VMs\ISOs\WindowsServer2022.iso
-```
+```text
 
 ## 2. Linux Guest Specifics
 
@@ -84,7 +84,7 @@ Set-VMFirmware -VMName ubuntu-01 -EnableSecureBoot Off
 
 # Or use Microsoft UEFI CA template (works with signed shim/grub on Ubuntu)
 Set-VMFirmware -VMName ubuntu-01 -SecureBootTemplate "MicrosoftUEFICertificateAuthority"
-```
+```text
 
 Inside the guest, install Hyper-V integration tools:
 
@@ -92,7 +92,7 @@ Inside the guest, install Hyper-V integration tools:
 # Modern kernels already include hv_* drivers - just install user-space tools
 sudo apt install -y linux-tools-virtual linux-cloud-tools-virtual hyperv-daemons
 sudo systemctl enable --now hv-kvp-daemon hv-vss-daemon hv-fcopy-daemon
-```
+```text
 
 ## 3. VM Hardening Checklist
 
@@ -109,7 +109,7 @@ Set-VMSecurity -VMName dc01 `
                -VirtualizationBasedSecurityOptOut $false
 Set-VMKeyProtector -VMName dc01 -NewLocalKeyProtector
 Enable-VMTPM -VMName dc01
-```
+```text
 
 ## 4. Resource Metering
 
@@ -120,7 +120,7 @@ Enable-VMResourceMetering -VMName dc01
 # ... let it run for a while ...
 Measure-VM -VMName dc01 | Format-List
 Reset-VMResourceMetering -VMName dc01
-```
+```text
 
 ## 5. Connect to the Console
 
@@ -130,7 +130,7 @@ vmconnect.exe localhost dc01
 
 # Or from PowerShell remoting once OS is installed
 Enter-PSSession -VMName dc01 -Credential (Get-Credential)
-```
+```text
 
 ## 6. Convert to Template
 
@@ -139,9 +139,9 @@ Enter-PSSession -VMName dc01 -Credential (Get-Credential)
 
 ```powershell
 Export-VM -Name dc01-template -Path "D:\VMs\Exports\Templates"
-```
+```text
 
-3. Future VMs are created via `Import-VM -Path ... -Copy -GenerateNewId` + rename + sysprep mini-setup answer file.
+1. Future VMs are created via `Import-VM -Path ... -Copy -GenerateNewId` + rename + sysprep mini-setup answer file.
 
 ## 7. Delete / Reset
 
@@ -152,4 +152,4 @@ Remove-VM -Name test-vm -Force
 
 # Manually clean disks
 Remove-Item "D:\VMs\test-vm" -Recurse -Force
-```
+```text

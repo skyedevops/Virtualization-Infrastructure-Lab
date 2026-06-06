@@ -35,7 +35,7 @@ Verify on Windows host:
 ```powershell
 Get-NetAdapter | Where-Object {$_.Name -like "*VMnet*"}
 ipconfig | findstr /C:"VMware Network Adapter"
-```
+```text
 
 You should see a `VMware Network Adapter VMnet2` interface with IP `10.10.20.1`.
 
@@ -59,7 +59,7 @@ Linux guest VLAN sub-interface example:
 sudo ip link add link ens33 name ens33.20 type vlan id 20
 sudo ip addr add 10.10.20.50/24 dev ens33.20
 sudo ip link set ens33.20 up
-```
+```text
 
 Persist via `/etc/netplan/01-netcfg.yaml`:
 
@@ -77,7 +77,7 @@ network:
       gateway4: 10.10.20.1
       nameservers:
         addresses: [10.10.20.10]
-```
+```text
 
 ## NAT Port Forwarding (VMnet8)
 

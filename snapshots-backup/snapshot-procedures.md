@@ -34,7 +34,7 @@ vmrun revertToSnapshot "D:\VMs\web01\web01.vmx" "pre-deploy-20260131-2100"
 
 # Delete (merges deltas back into base)
 vmrun deleteSnapshot "D:\VMs\web01\web01.vmx" "pre-deploy-20260131-2100"
-```
+```text
 
 GUI: VM -> Snapshot -> Snapshot Manager.
 
@@ -54,14 +54,14 @@ Restore-VMSnapshot -Name "pre-deploy-20260131-2100" -VMName web01 -Confirm:$fals
 
 # Delete
 Remove-VMSnapshot -Name "pre-deploy-20260131-2100" -VMName web01
-```
+```text
 
 Switch between Production (default, VSS / app-consistent) and Standard (crash-consistent) checkpoints:
 
 ```powershell
 Set-VM -Name web01 -CheckpointType Production    # default
 Set-VM -Name web01 -CheckpointType Standard      # crash-consistent only
-```
+```text
 
 ---
 
@@ -85,7 +85,7 @@ pct rollback 200 pre-deploy-20260131-2100
 # Delete
 qm delsnapshot 101 pre-deploy-20260131-2100
 pct delsnapshot 200 pre-deploy-20260131-2100
-```
+```text
 
 To include guest RAM in a KVM snapshot, add `--vmstate 1` (requires storage that supports it, e.g. ZFS/qcow2).
 
@@ -100,7 +100,7 @@ After=pve-cluster.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/snapshot-rotate.sh
-```
+```text
 
 ```ini
 # /etc/systemd/system/snapshot-rotate.timer
@@ -113,7 +113,7 @@ Persistent=true
 
 [Install]
 WantedBy=timers.target
-```
+```text
 
 ---
 
@@ -132,7 +132,7 @@ VBoxManage snapshot "ubuntu-01" restore "pre-deploy-20260131-2100"
 
 # Delete
 VBoxManage snapshot "ubuntu-01" delete  "pre-deploy-20260131-2100"
-```
+```text
 
 `--live` lets you snapshot a running VM without pausing (slight perf hit during the take).
 

@@ -64,7 +64,7 @@ ping -c 3 1.1.1.1        # internet
 
 # Port reachability
 nc -zv dc01.lab.local 389
-```
+```text
 
 PowerShell equivalents:
 
@@ -73,4 +73,4 @@ Test-NetConnection -ComputerName dc01.lab.local -Port 389
 Test-NetConnection -ComputerName 1.1.1.1 -Port 443
 Get-NetIPConfiguration
 Get-DnsClientServerAddress
-```
+```text

@@ -32,7 +32,8 @@ note "RAM used: ${mem_used_pct}%"
 df -h --output=target,pcent | awk 'NR>1' | while read mnt pct; do
   num=${pct%\%}
   case "$mnt" in
-    /dev*|/run*|/sys*|/proc*|tmpfs|/dev/shm) continue ;;
+    tmpfs|/dev/shm) continue ;;
+    /dev|/run|/sys|/proc|"/") continue ;;
   esac
   if (( num >= 90 )); then
     echo "FAIL_DISK $mnt $pct"

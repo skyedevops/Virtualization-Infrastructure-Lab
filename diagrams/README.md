@@ -6,7 +6,7 @@ in mkdocs-material. To preview locally:
 ```bash
 # VS Code: install the "Markdown Preview Mermaid Support" extension
 # Or: https://mermaid.live  (paste the ```mermaid block)
-```
+```text
 
 ## Index
 

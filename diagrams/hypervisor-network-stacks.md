@@ -39,7 +39,7 @@ flowchart TB
     vswitch --> nic
     vbr --> nic
     vbif --> nic
-```
+```text
 
 ## Concept-to-Command Map
 
@@ -90,7 +90,7 @@ flowchart LR
     N3 --- V3 & H3 & P3 & B3
     N4 --- V4 & H4 & P4 & B4
     N5 --- V5 & H5 & P5 & B5
-```
+```text
 
 ## Key Takeaways
 
