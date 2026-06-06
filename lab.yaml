@@ -1,0 +1,186 @@
+# =============================================================================
+# lab.yaml - Virtualization & Infrastructure Lab inventory
+# =============================================================================
+# This file is the single source of truth for the lab.  The `make` runners
+# (scripts/make.sh, scripts/make.ps1) consume it and dispatch the right
+# command to the right hypervisor.
+#
+# Edit this file, then run:  make apply
+# To see what would change:  make plan
+# =============================================================================
+
+lab:
+  name: homelab
+  version: "1.0"
+  timezone: UTC
+  dns_search: lab.local
+  dns_servers:
+    - 10.10.20.10
+    - 1.1.1.1
+  ntp_servers:
+    - 10.10.20.10
+    - pool.ntp.org
+
+# Per-hypervisor connection settings.  The runner uses these to push commands.
+hypervisors:
+  pve01:
+    type: proxmox
+    host: 10.10.10.11
+    ssh_user: root
+    # ssh_key: ~/.ssh/id_ed25519
+    default_bridge: vmbr0
+    default_storage: local-lvm
+    iso_storage: local
+
+  hyperv01:
+    type: hyperv
+    host: 10.10.10.12
+    win_user: Administrator
+    default_switch: vSwitch-Internal
+    default_vm_path: "D:\\VMs"
+    default_vhd_path: "D:\\VMs\\Virtual Hard Disks"
+
+# Network segments the runners can attach VMs to.
+# vlan_id 0  -> untagged / default bridge
+# vlan_id >0 -> tagged at the hypervisor NIC level (Proxmox: tag=N, Hyper-V: -VlanId N)
+networks:
+  mgmt:
+    vlan_id: 10
+    subnet: 10.10.10.0/24
+    gateway: 10.10.10.1
+    dhcp: false
+  servers:
+    vlan_id: 20
+    subnet: 10.10.20.0/24
+    gateway: 10.10.20.1
+    dhcp: false
+  clients:
+    vlan_id: 30
+    subnet: 10.10.30.0/24
+    gateway: 10.10.30.1
+    dhcp: true
+  dmz:
+    vlan_id: 40
+    subnet: 10.10.40.0/24
+    gateway: 10.10.40.1
+    dhcp: false
+  storage:
+    vlan_id: 99
+    subnet: 10.10.99.0/24
+    gateway: 10.10.99.1
+    dhcp: false
+
+# Service VMs that everything else depends on.  Listed first so the start
+# order (startOrder ascending) is correct.
+vms:
+
+  - name: pfsense
+    hypervisor: pve01
+    vmid: 100
+    role: firewall
+    network: servers   # management leg on servers VLAN
+    secondary_networks: [clients, dmz, storage, mgmt]   # multi-homed router
+    cpu: 2
+    memory_mb: 2048
+    disk_gb: 20
+    iso: pfSense-CE-2.7.2-RELEASE-amd64.iso
+    start_order: 5
+    onboot: true
+    notes: |
+      Edge firewall + router. WAN on vmbr0 (home router uplink),
+      LAN trunk on vmbr0 carrying all five VLANs.
+
+  - name: dc01
+    hypervisor: hyperv01
+    cpu: 2
+    memory_mb: 4096
+    disk_gb: 80
+    iso: WindowsServer2022.iso
+    role: domain_controller
+    network: servers
+    ip: 10.10.20.10/24
+    start_order: 10
+    onboot: true
+    post_install: windows-vm-postinstall.ps1
+    domain: lab.local
+    notes: |
+      First DC in the forest. Promoted to DC during post-install via
+      `Install-ADDSForest`. Also runs DNS + DHCP.
+
+  - name: fs01
+    hypervisor: hyperv01
+    cpu: 2
+    memory_mb: 4096
+    disk_gb: 100
+    role: file_server
+    network: servers
+    ip: 10.10.20.20/24
+    start_order: 20
+    onboot: true
+    post_install: windows-vm-postinstall.ps1
+    domain_member: lab.local
+    notes: |
+      File server. Joins the domain during post-install.
+
+  - name: web01
+    hypervisor: pve01
+    vmid: 101
+    role: web
+    network: dmz
+    ip: 10.10.40.10/24
+    cpu: 2
+    memory_mb: 1024
+    disk_gb: 20
+    iso: ubuntu-22.04.4-live-server-amd64.iso
+    start_order: 30
+    onboot: false
+    post_install: linux-vm-postinstall.sh
+    notes: |
+      Ubuntu 22.04 LTS web server, nginx, in the DMZ.
+
+  - name: grafana
+    hypervisor: pve01
+    vmid: 102
+    role: monitoring
+    network: servers
+    ip: 10.10.20.50/24
+    cpu: 2
+    memory_mb: 2048
+    disk_gb: 50
+    iso: ubuntu-22.04.4-live-server-amd64.iso
+    start_order: 40
+    onboot: true
+    post_install: linux-vm-postinstall.sh
+    notes: |
+      Prometheus + Grafana VM. Pulls node_exporter from every other VM.
+
+  - name: pbs01
+    hypervisor: pve01
+    vmid: 110
+    role: backup
+    network: storage
+    ip: 10.10.99.10/24
+    cpu: 2
+    memory_mb: 4096
+    disk_gb: 100
+    iso: proxmox-backup-server-3.2.iso
+    start_order: 1
+    onboot: true
+    notes: |
+      Proxmox Backup Server. Dedup, encrypted, incremental-forever
+      backups of every pve01 VM.
+
+  - name: win10-admin01
+    hypervisor: hyperv01
+    cpu: 2
+    memory_mb: 4096
+    disk_gb: 60
+    iso: Win10_22H2_English_x64v1.iso
+    role: admin_workstation
+    network: clients
+    start_order: 50
+    onboot: false
+    post_install: windows-vm-postinstall.ps1
+    domain_member: lab.local
+    notes: |
+      RSAT admin workstation. Joins the lab domain.

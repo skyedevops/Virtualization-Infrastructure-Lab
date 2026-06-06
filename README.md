@@ -78,7 +78,13 @@ See [docs/lab-topology.md](docs/lab-topology.md) for the full network and storag
 ├── scripts/
 │   ├── powershell/              # Hyper-V / Windows automation
 │   ├── bash/                    # Proxmox / Linux automation
-│   └── python/                  # Cross-platform tooling
+│   ├── python/                  # Cross-platform tooling
+│   ├── python/labctl.py         # Lab-in-a-box runner (reads lab.yaml)
+│   └── make.ps1                 # Windows entry point (mirrors the Makefile)
+├── lab.yaml                     # Declarative inventory of every VM
+├── Makefile                     # Cross-platform entry point
+├── ROADMAP.md                   # v1.x -> v4.x phases
+├── CONTRIBUTING.md              # Ground rules + linter quick-start
 └── diagrams/                    # Network and architecture diagrams
 ```text
 
@@ -91,6 +97,7 @@ See [docs/lab-topology.md](docs/lab-topology.md) for the full network and storag
 3. Use the guest build guides under `virtual-machines/` to provision your first VM.
 4. Implement networking from `networking/README.md`.
 5. Establish your snapshot and backup baseline from `snapshots-backup/README.md`.
+6. **Drive the lab from `lab.yaml`** with `make plan` (Linux/macOS) or `.\scripts\make.ps1 plan` (Windows). See [docs/lab-yaml-schema.md](docs/lab-yaml-schema.md).
 
 ---
 

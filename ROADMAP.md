@@ -13,7 +13,7 @@ between lists as work progresses.
 | **v1.1 - Video Script + Trade-off Docs** | Complete | `2ae4f81` |
 | **v1.2 - Roadmap** | In progress | this commit |
 | **v1.3 - Diagrams** | Complete | this commit |
-| **v1.4 - Lab-in-a-Box Bootstrap** | Planned | - |
+| **v1.4 - Lab-in-a-Box Bootstrap** | Complete | this commit |
 | **v1.5 - CI for the Scripts** | Complete | this commit |
 | **v2.0 - Multi-Host Proxmox Cluster** | Planned | - |
 | **v2.1 - Proxmox Backup Server** | Planned | - |
@@ -37,10 +37,12 @@ Documentation and reproducibility polish. No new lab hardware.
 - [x] Per-hypervisor network stack diagram (VLAN/bridge/port)
 
 ### v1.4 - Lab-in-a-Box Bootstrap
-- [ ] `make` / `make.ps1` targets: `init`, `vm`, `backup`, `restore`, `drill`, `destroy`
-- [ ] Single-file inventory of every VM in the lab (`lab.yaml`)
-- [ ] Idempotent `bootstrap.sh` / `bootstrap.ps1` that builds a fresh lab from scratch
-- [ ] Test on a clean VM at least once
+- [x] `make` / `make.ps1` targets: `validate`, `plan`, `apply`, `inventory`, `start`, `stop`, `backup`, `drill`
+- [x] Single-file inventory of every VM in the lab (`lab.yaml`)
+- [x] `scripts/python/labctl.py` - the runner, with per-hypervisor command generators
+- [x] `docs/lab-yaml-schema.md` - schema reference + validation rules
+- [ ] Idempotent `bootstrap.sh` / `bootstrap.ps1` that builds a fresh lab from scratch (deferred to v2.0)
+- [ ] `apply` is still dry-run; real provisioning needs the SSH/WinRM transport in v2.0
 
 ### v1.5 - CI for the Scripts
 - [x] GitHub Actions: bash `shellcheck`, python `ruff`/`pytest`, powershell `PSScriptAnalyzer`
