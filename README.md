@@ -17,6 +17,7 @@ This lab was built to gain practical, production-grade experience with the major
 - Resource allocation, performance tuning, and capacity planning
 - Automation with PowerShell, Bash, and the Proxmox API
 - Multi-host Proxmox cluster operations: shared storage, live-migration, and HA failover drills
+- Proxmox Backup Server deployment, scheduled deduplicated backups, and nightly restore-drill verification
 
 ---
 
@@ -100,7 +101,8 @@ See [docs/lab-topology.md](docs/lab-topology.md) for the full network and storag
 5. Establish your snapshot and backup baseline from `snapshots-backup/README.md`.
 6. **Drive the lab from `lab.yaml`** with `make plan` (Linux/macOS) or `.\scripts\make.ps1 plan` (Windows). See [docs/lab-yaml-schema.md](docs/lab-yaml-schema.md).
 7. **Cluster operations** (v2.0+): `python3 scripts/python/labctl.py migrate --vm X --target pve02 --execute` for live-migration; `ha-status` and `drill-ha-failover` for HA. See [docs/live-migration-runbook.md](docs/live-migration-runbook.md).
-8. **Roadmap in the issue tracker** - every item in [ROADMAP.md](ROADMAP.md) is mirrored as a GitHub Issue with the `roadmap` label, plus a `phase/vN.M` label, so filtering by phase (e.g. `is:open label:phase/v2.1`) gives you the backlog for that milestone. Re-run `scripts/seed-roadmap-issues.sh --close-done` to re-sync after a tick.
+8. **PBS backups** (v2.1+): `python3 scripts/python/labctl.py pbs-init --execute` to bring up the datastores, then `backup --execute` (or the cron-friendly `scripts/bash/pbs-restore-test.sh --datastore pbs01/main --execute`) for the nightly restore drill. See [docs/pbs-setup.md](docs/pbs-setup.md) and [docs/pbs-restore-test.md](docs/pbs-restore-test.md).
+9. **Roadmap in the issue tracker** - every item in [ROADMAP.md](ROADMAP.md) is mirrored as a GitHub Issue with the `roadmap` label, plus a `phase/vN.M` label, so filtering by phase (e.g. `is:open label:phase/v2.2`) gives you the backlog for that milestone. Re-run `scripts/seed-roadmap-issues.sh --close-done` to re-sync after a tick.
 
 ---
 

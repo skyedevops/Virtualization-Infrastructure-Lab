@@ -22,7 +22,7 @@ between lists as work progresses.
 | **v1.4 - Lab-in-a-Box Bootstrap** | Complete | this commit |
 | **v1.5 - CI for the Scripts** | Complete | this commit |
 | **v2.0 - Multi-Host Proxmox Cluster** | In progress | this commit |
-| **v2.1 - Proxmox Backup Server** | Planned | - |
+| **v2.1 - Proxmox Backup Server** | Complete | this commit |
 | **v2.2 - Observability Stack** | Planned | - |
 | **v2.3 - IaC with Terraform + Ansible** | Planned | - |
 | **v3.0 - DR Drills + SLO Testing** | Planned | - |
@@ -80,10 +80,23 @@ New infrastructure, same repo conventions.
 - [x] `docs/live-migration-runbook.md` - planned/HA/drill scenarios
 
 ### v2.1 - Proxmox Backup Server (PBS)
-- [ ] Dedicated PBS VM on NAS or separate mini-PC
-- [ ] PBS datastore add on each PVE node
-- [ ] Backup jobs with deduplicated, encrypted, incremental-forever snapshots
-- [ ] `restore-test` job that pulls a random backup nightly and boots it in an isolated VLAN
+- [x] Decision doc: PBS VM on NAS vs bare-metal mini-PC vs on-cluster
+      (`docs/pbs-decision.md` - PBS-on-NAS recommended; chicken-and-egg
+      problem rules out on-cluster)
+- [x] `labctl.py` PBS data model + subcommands: `PbsServer` /
+      `PbsDatastore` / `BackupJob` dataclasses, `pbs_servers:` block in
+      `lab.yaml`, `backup_jobs:` array, 6 new validation rules
+- [x] `labctl pbs-status` / `pbs-init` / `pbs-restore-test` /
+      `backup --vm X --execute` subcommands
+- [x] Bash runbooks: `scripts/bash/pbs-init.sh`, `pbs-backup.sh`,
+      `pbs-restore-test.sh` (no Python dependency for cron)
+- [x] fake-pbs shim + integration test
+      (`tests/integration/test_pbs_backup.py`, 9 cases; spins up
+      fake-pbs container with the shim + asserts round-trip)
+- [x] `docs/pbs-setup.md` and `docs/pbs-restore-test.md` -
+      operator-facing install runbook + nightly-drill runbook
+- [x] Total integration suite now 27/27 passing in ~90s
+      (11 single-host + 7 cluster + 9 PBS)
 
 ### v2.2 - Observability Stack
 - [ ] Prometheus + node_exporter on every VM (Linux, Windows exporter for Windows guests)
