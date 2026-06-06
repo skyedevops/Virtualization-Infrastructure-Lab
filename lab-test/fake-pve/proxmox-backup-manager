@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# proxmox-backup-manager - a fake PBS management CLI used by the
+# labctl integration test.  Mirrors the subset of `pbs-manager` that
+# the labctl PBS subcommands and the bash runbooks use:
+#
+#   datastore list            text table of known datastores
+#   datastore create N PATH   create + mkdir
+#   snapshot list DS          JSON list of snapshots in DS
+#   prune-job list            text table of known prune jobs
+#   prune-job create N ...    record a prune job
+#   prune-job update N ...    replace an existing prune job
+#   backup DS:SNAP ...        register a fake backup
+#   prune DS:SNAP ...         record a prune
+#   job list / job create     schedule a backup+prune combo
+#
+# State lives in /var/lib/pbs/state.json:
+#   {
+#     "datastores": {"main": "/backup/pbs/main", ...},
+#     "snapshots":  {"main:backup-x/2026-...": {vm: x, when: ...}},
+#     "prune_jobs": {"main-prune": {schedule: "...", keep_last: 3, ...}}
+#   }
+#
+# Read knobs from /etc/pbs-test.conf (same pattern as fake-pve).
+
+set -euo pipefail
+
+if [[ -r /etc/pbs-test.conf ]]; then
+  set -a; # shellcheck disable=SC1091
+  source /etc/pbs-test.conf; set +a
+fi
+
+LOG_DIR="${LOG_DIR:-/var/log/pbs}"
+STATE_FILE="${STATE_FILE:-/var/lib/pbs/state.json}"
+mkdir -p "$LOG_DIR" "$(dirname "$STATE_FILE")"
+if [[ ! -s "$STATE_FILE" ]] || ! jq -e . "$STATE_FILE" >/dev/null 2>&1; then
+  printf '{"datastores":{},"snapshots":{},"prune_jobs":{}}\n' > "$STATE_FILE"
+fi
+
+{
+  echo "--- $(date -Is) ---"
+  echo "args: $*"
+} >> "$LOG_DIR/proxmox-backup-manager.log"
+
+cmd="${1:-}"; shift || true
+
+case "$cmd" in
+  datastore)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      list)
+        # Look ahead for --output-format <fmt> to decide the on-wire form.
+        # Default to text (NAME PATH) for human-friendly default behaviour.
+        fmt="text"
+        for ((i = 1; i <= $#; i++)); do
+          arg="${!i}"
+          if [[ "$arg" == "--output-format" ]]; then
+            next=$((i + 1))
+            fmt="${!next}"
+            break
+          fi
+        done
+        if [[ "$fmt" == "json" ]]; then
+          jq -c '{datastores: (.datastores | to_entries | map({name: .key, path: .value}))}' \
+            "$STATE_FILE"
+        else
+          jq -r '.datastores | to_entries[] | "\(.key) \(.value)"' "$STATE_FILE" \
+            | awk 'BEGIN{print "NAME PATH"} {print}'
+        fi
+        ;;
+      create)
+        name="${1:-}"; path="${2:-}"
+        [[ -n "$name" && -n "$path" ]] || { echo "usage: datastore create NAME PATH" >&2; exit 2; }
+        mkdir -p "$path/.chunks"
+        tmp=$(mktemp)
+        jq --arg n "$name" --arg p "$path" '.datastores[$n] = $p' \
+          "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+        echo "created datastore $name at $path"
+        ;;
+      *) echo "datastore: unsupported subcommand: $sub" >&2; exit 2 ;;
+    esac
+    ;;
+  snapshot)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      list)
+        ds="${1:-}"
+        # Scan for --output-format <fmt> anywhere in the arg list
+        # (the real PBS CLI accepts it as a flag, not a positional).
+        fmt="text"
+        for ((i = 1; i <= $#; i++)); do
+          arg="${!i}"
+          if [[ "$arg" == "--output-format" ]]; then
+            next=$((i + 1))
+            fmt="${!next}"
+            break
+          fi
+        done
+        # Accept either "datastore" or "pbs/datastore" form.  We ignore
+        # the optional "<pbs>/" prefix here because the shim stores all
+        # snapshots in a single dict; the script that consumes this
+        # output just picks one at random from the last 7 days.
+        # shellcheck disable=SC2034  # ds is part of the contract
+        : "${ds:=}"
+        if [[ "$fmt" == "json" ]]; then
+          # The fake shim stores every snapshot in a single dict; we
+          # return them all (the pbs-restore-test script picks one at
+          # random from the last 7 days, so a per-datastore filter
+          # would be artificial anyway).
+          jq '{snapshots: (.snapshots | keys)}' "$STATE_FILE"
+        else
+          jq -r '.snapshots | keys[]' "$STATE_FILE"
+        fi
+        ;;
+      *) echo "snapshot: unsupported subcommand: $sub" >&2; exit 2 ;;
+    esac
+    ;;
+  prune-job)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      list)
+        jq -r '.prune_jobs | keys[]' "$STATE_FILE" 2>/dev/null \
+          | awk 'BEGIN{print "NAME"} {print}'
+        ;;
+      create)
+        # parse: NAME --schedule S --store DS --keep-last N ...
+        name="${1:-}"; shift
+        sched=""; store=""; kl=3; kd=7; kw=4; km=6
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --schedule)    sched="$2"; shift 2 ;;
+            --store)       store="$2"; shift 2 ;;
+            --keep-last)   kl="$2";    shift 2 ;;
+            --keep-daily)  kd="$2";    shift 2 ;;
+            --keep-weekly) kw="$2";    shift 2 ;;
+            --keep-monthly) km="$2";   shift 2 ;;
+            *) shift ;;
+          esac
+        done
+        [[ -n "$name" ]] || { echo "prune-job create: missing NAME" >&2; exit 2; }
+        tmp=$(mktemp)
+        jq --arg n "$name" --arg sched "$sched" --arg store "$store" \
+           --argjson kl "$kl" --argjson kd "$kd" --argjson kw "$kw" --argjson km "$km" \
+           '.prune_jobs[$n] = {schedule:$sched, store:$store, keep_last:$kl, keep_daily:$kd, keep_weekly:$kw, keep_monthly:$km}' \
+           "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+        echo "created prune-job $name"
+        ;;
+      update)
+        # Same args as create, but the record is replaced in place.
+        name="${1:-}"; shift
+        sched=""; store=""; kl=0; kd=0; kw=0; km=0
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --schedule)    sched="$2"; shift 2 ;;
+            --store)       store="$2"; shift 2 ;;
+            --keep-last)   kl="$2";    shift 2 ;;
+            --keep-daily)  kd="$2";    shift 2 ;;
+            --keep-weekly) kw="$2";    shift 2 ;;
+            --keep-monthly) km="$2";   shift 2 ;;
+            *) shift ;;
+          esac
+        done
+        [[ -n "$name" ]] || { echo "prune-job update: missing NAME" >&2; exit 2; }
+        tmp=$(mktemp)
+        jq --arg n "$name" --arg sched "$sched" --arg store "$store" \
+           --argjson kl "$kl" --argjson kd "$kd" --argjson kw "$kw" --argjson km "$km" \
+           '.prune_jobs[$n] = {schedule:$sched, store:$store, keep_last:$kl, keep_daily:$kd, keep_weekly:$kw, keep_monthly:$km}' \
+           "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+        echo "updated prune-job $name"
+        ;;
+      *) echo "prune-job: unsupported subcommand: $sub" >&2; exit 2 ;;
+    esac
+    ;;
+  backup)
+    # backup DS:SNAP --vmid N --node X --storage S --mode M
+    snap="${1:-}"; shift
+    vmid=""; node=""; storage=""; mode="snapshot"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --vmid)    vmid="$2";    shift 2 ;;
+        --node)    node="$2";    shift 2 ;;
+        --storage) storage="$2"; shift 2 ;;
+        --mode)    mode="$2";    shift 2 ;;
+        --notification-mode) shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [[ -n "$snap" ]] || { echo "backup: missing DS:SNAP" >&2; exit 2; }
+    # Optional fault injection: refuse to back up specific VMIDs.
+    if [[ -n "${PBS_FAIL_VMIDS:-}" ]]; then
+      IFS=',' read -r -a fails <<< "$PBS_FAIL_VMIDS"
+      for f in "${fails[@]}"; do
+        if [[ "$f" == "$vmid" ]]; then
+          echo "simulated backup failure for vmid=$vmid" >&2
+          exit 1
+        fi
+      done
+    fi
+    # Real PBS snapshot keys look like:  host/<pbs-host>/<type>/<vmid>/<timestamp>
+    # but the script pbs-restore-test.sh uses regex
+    #   (host/[^/]+/)?(?:[a-z]+/)?(\d+)/(\d{4}-\d{2}-\d{2}T\S+)
+    # so we emit:  host/<pbs>/<type>/<vmid>/<timestamp>
+    pbs_host="${PBS_HOSTNAME:-pbs01}"
+    snap_type="${SNAP_TYPE:-backup}"
+    key="host/${pbs_host}/${snap_type}/${vmid}/$(date -Iseconds)"
+    tmp=$(mktemp)
+    jq --arg k "$key" --arg vmid "$vmid" --arg node "$node" \
+       --arg storage "$storage" --arg mode "$mode" \
+       '.snapshots[$k] = {vmid:$vmid, node:$node, storage:$storage, mode:$mode, when:(now|todate)}' \
+       "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    echo "backed up $snap (vmid=$vmid node=$node)"
+    ;;
+  prune)
+    # prune DS:SNAP --keep-last N ...
+    snap="${1:-}"; shift
+    echo "prune: $snap $*"
+    ;;
+  job)
+    sub="${1:-}"; shift || true
+    case "$sub" in
+      list) jq -r '.prune_jobs | keys[]' "$STATE_FILE" 2>/dev/null | awk 'BEGIN{print "NAME"} {print}' ;;
+      create)
+        # We don't model real jobs; just acknowledge.
+        echo "created job $1"
+        ;;
+      *) echo "job: unsupported subcommand: $sub" >&2; exit 2 ;;
+    esac
+    ;;
+  *)
+    echo "proxmox-backup-manager: unsupported fake command: $cmd" >&2
+    exit 2
+    ;;
+esac

@@ -20,7 +20,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update -qq && \
     apt-get install -y --no-install-recommends \
-        openssh-server openssh-client jq ca-certificates && \
+        openssh-server openssh-client jq ca-certificates curl \
+        software-properties-common && \
+    add-apt-repository -y universe && \
+    apt-get install -y --no-install-recommends python3 python3-yaml && \
     rm -rf /var/lib/apt/lists/* && \
     useradd -m -s /bin/bash labadmin && \
     mkdir -p /run/sshd /var/log/lab /var/lib/lab /root/.ssh && \
@@ -53,6 +56,9 @@ RUN printf '%s\n' \
 
 COPY qm /usr/local/bin/qm
 COPY ha-manager /usr/local/bin/ha-manager
+COPY proxmox-backup-manager /usr/local/bin/proxmox-backup-manager
+# qmrestore is a real Proxmox binary.  In the fake we shim it via qm.
+RUN ln -sf /usr/local/bin/qm /usr/local/bin/qmrestore
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY authorized_keys /root/.ssh/authorized_keys
 

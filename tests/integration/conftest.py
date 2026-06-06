@@ -22,9 +22,12 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LABCTL = REPO_ROOT / "scripts" / "python" / "labctl.py"
 FAKE_PVE_DIR = REPO_ROOT / "lab-test" / "fake-pve"
+FAKE_PBS_DIR = REPO_ROOT / "lab-test" / "fake-pbs"
 FIXTURE_KEY = REPO_ROOT / "lab-test" / "fixtures" / "id_ed25519"
 FIXTURE_LAB = REPO_ROOT / "lab-test" / "fixtures" / "lab.yaml"
+FIXTURE_PBS_LAB = REPO_ROOT / "lab-test" / "fixtures" / "lab-pbs.yaml"
 IMAGE_TAG = "lab-test/fake-pve:e2e"
+PBS_IMAGE_TAG = "lab-test/fake-pbs:e2e"
 CONTAINER_NAME = "labctl-e2e-fake-pve"
 
 
@@ -96,6 +99,57 @@ def fake_pve_image(docker_client: object) -> str:
         rm=True, forcerm=True,
     )
     return image.id if hasattr(image, "id") else IMAGE_TAG
+
+
+@pytest.fixture(scope="session")
+def fake_pbs_image(docker_client: object) -> str:
+    """Build the fake-pbs image once per test session."""
+    image, _log = docker_client.images.build(  # type: ignore[attr-defined]
+        path=str(FAKE_PBS_DIR),
+        tag=PBS_IMAGE_TAG,
+        rm=True, forcerm=True,
+    )
+    return image.id if hasattr(image, "id") else PBS_IMAGE_TAG
+
+
+PBS_CONTAINER_NAME = "labctl-e2e-fake-pbs"
+
+
+@pytest.fixture()
+def fake_pbs_container(docker_client: object, fake_pbs_image: str) -> Iterator[dict]:
+    """Run a fresh fake-pbs container with a random host port; tear it down after."""
+    port = _free_port()
+    try:
+        existing = docker_client.containers.get(PBS_CONTAINER_NAME)  # type: ignore[attr-defined]
+        existing.remove(force=True)
+    except Exception:
+        pass
+
+    container = docker_client.containers.run(  # type: ignore[attr-defined]
+        PBS_IMAGE_TAG,
+        name=PBS_CONTAINER_NAME,
+        detach=True,
+        auto_remove=False,
+        ports={"22/tcp": ("127.0.0.1", port)},
+    )
+    info = {
+        "container": container,
+        "host": "127.0.0.1",
+        "port": port,
+        "ssh_key": FIXTURE_KEY,
+        "node_name": "pbs01",
+    }
+    try:
+        if not _ssh_ready("127.0.0.1", port, FIXTURE_KEY, timeout=45):
+            logs = container.logs(stdout=True, stderr=True).decode("utf-8", "ignore")
+            pytest.fail(f"fake-pbs sshd did not become ready on port {port}\n--- container logs ---\n{logs}")
+        time.sleep(0.5)
+        yield info
+    finally:
+        try:
+            container.remove(force=True)
+        except Exception:
+            pass
 
 
 @pytest.fixture()
@@ -250,11 +304,40 @@ def rendered_lab(request, tmp_path: Path) -> Path:
 
 
 @pytest.fixture()
+def rendered_pbs_lab(
+    request, tmp_path: Path,
+    fake_pve_container, fake_pbs_container,
+) -> Path:
+    """Materialise lab-pbs.yaml pointing at the running fake_pve_container
+    + fake_pbs_container.  We pass both fixtures as function args so they
+    start for this test.
+    """
+    content = FIXTURE_PBS_LAB.read_text()
+    content = content.replace(
+        "ssh_port_pve01: 23001",
+        f"ssh_port: {fake_pve_container['port']}",
+    )
+    content = content.replace(
+        "ssh_port_pbs01: 23002",
+        f"ssh_port: {fake_pbs_container['port']}",
+    )
+    out = tmp_path / "lab.yaml"
+    out.write_text(content)
+    return out
+
+
+@pytest.fixture()
 def labctl_env() -> dict:
     """Env vars the labctl subprocess should inherit."""
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
     return env
+
+
+@pytest.fixture()
+def repo_root() -> Path:
+    """Absolute path to the repo root (scripts/, docs/, etc.)."""
+    return REPO_ROOT
 
 
 def run_labctl(args: list[str], env: dict | None = None) -> subprocess.CompletedProcess:

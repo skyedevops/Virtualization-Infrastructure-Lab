@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# ha-manager - a fake Proxmox ha-manager shim used by the labctl
+# integration test.  Mirrors the subset of ha-manager that labctl.py
+# uses: status, config, add, remove, fence.
+#
+# State lives in /var/lib/lab/ha.json:
+#   {
+#     "resources": [
+#       {"vm": "100", "group": "tier1", "state": "started", "node": "pve01"}
+#     ],
+#     "fenced": []       # nodes that drill-ha-failover has fenced
+#   }
+#
+# Read knobs from /etc/lab-test.conf (same pattern as the qm shim).
+
+set -euo pipefail
+
+if [[ -r /etc/lab-test.conf ]]; then
+  set -a; # shellcheck disable=SC1091
+  source /etc/lab-test.conf; set +a
+fi
+
+LOG_DIR="${LOG_DIR:-/var/log/lab}"
+STATE_FILE="${STATE_FILE:-/var/lib/lab/ha.json}"
+mkdir -p "$LOG_DIR" "$(dirname "$STATE_FILE")"
+if [[ ! -s "$STATE_FILE" ]] || ! jq -e . "$STATE_FILE" >/dev/null 2>&1; then
+  printf '{"resources":[],"fenced":[]}\n' > "$STATE_FILE"
+fi
+
+{
+  echo "--- $(date -Is) ---"
+  echo "args: $*"
+} >> "$LOG_DIR/ha-manager.log"
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  status)
+    # ha-manager status prints a 3-line block per resource:
+    #   <id> <state> <node> (<group>)
+    jq -r '
+      (.resources // [])[]? |
+      "\(.vm) \(.state) \(.node) (\(.group // "-"))"
+    ' "$STATE_FILE" 2>/dev/null
+    # Also note any fenced nodes.
+    jq -r '
+      .fenced[]? |
+      "FENCED NODE: \(.)"
+    ' "$STATE_FILE" 2>/dev/null
+    ;;
+  config)
+    # ha-manager config prints full resource/group config.
+    jq -r '"--- resources ---", (.resources // [])[], "", "--- groups ---"' "$STATE_FILE" 2>/dev/null
+    ;;
+  add)
+    # ha-manager add vm:<vmid> --group <group> [--max_relocate N]
+    vm=""
+    grp=""
+    maxrel="2"
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        vm:*)   vm="${1#vm:}";   shift ;;
+        --group) grp="$2";       shift 2 ;;
+        --max_relocate) maxrel="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    [[ -z "$vm" ]]  && { echo "ha-manager add: missing vm:" >&2; exit 2; }
+    [[ -z "$grp" ]] && grp="default"
+    echo "add: vm=$vm group=$grp max_relocate=$maxrel" >> "$LOG_DIR/ha-manager.log"
+    tmp=$(mktemp)
+    jq --arg vm "$vm" --arg grp "$grp" --arg node "${FAKE_NODE_NAME:-pve01}" --argjson maxrel "$maxrel" \
+       '(.resources // []) += [{vm:$vm, group:$grp, state:"started", node:$node, max_relocate:$maxrel}]' \
+       "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    ;;
+  remove)
+    vm="${1#vm:}"
+    tmp=$(mktemp)
+    jq --arg vm "$vm" '(.resources // []) |= map(select(.vm != $vm))' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    ;;
+  fence)
+    # ha-manager fence <node> - mark the node as fenced; resources on it
+    # move to "fenced" state.  Used by drill-ha-failover.
+    node="${1:-}"
+    [[ -z "$node" ]] && { echo "ha-manager fence: missing node" >&2; exit 2; }
+    echo "fence: node=$node" >> "$LOG_DIR/ha-manager.log"
+    tmp=$(mktemp)
+    jq --arg node "$node" '
+      .fenced = ((.fenced // []) + [$node] | unique) |
+      (.resources // []) |= map(
+        if .node == $node then .state = "fenced" else . end
+      )
+    ' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    ;;
+  unfence)
+    # ha-manager unfence <node> - reverse fence, restore resources
+    # to "started" state on a surviving node.
+    node="${1:-}"
+    tmp=$(mktemp)
+    jq --arg node "$node" '
+      .fenced = ((.fenced // []) - [$node]) |
+      (.resources // []) |= map(
+        if .state == "fenced" then .state = "started" else . end
+      )
+    ' "$STATE_FILE" > "$tmp" && mv "$tmp" "$STATE_FILE"
+    ;;
+  *)
+    echo "ha-manager: unsupported fake command: $cmd" >&2
+    exit 2
+    ;;
+esac

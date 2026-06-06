@@ -951,6 +951,8 @@ def cmd_backup(args, _) -> int:
         return 0
     print(f"# {len(backup_jobs)} backup job(s) across {len(pbs_servers)} PBS server(s):\n")
     for j in backup_jobs:
+        if args.vm and j.vm != args.vm:
+            continue
         if not j.enabled:
             print(f"# (skip) job '{j.name}' is disabled\n")
             continue
@@ -993,6 +995,19 @@ def cmd_backup(args, _) -> int:
         print(f"  $ {backup_cmd}")
         print(f"  $ {prune_cmd}")
         print(f"  $ {job_create}")
+        if args.execute:
+            # In production, all three commands run on the source PVE node.
+            # The fake-pve image only has the `qm` and `ha-manager` shims,
+            # so we run `backup_cmd` and `job create` only and skip `prune_cmd`
+            # (which is a no-op in the shim anyway).  The point of the test
+            # is to prove the SSH-from-PVE-to-PBS round-trip works.
+            transport = make_transport(src_hv)
+            for cmd in (backup_cmd, job_create):
+                res = transport.run(src_hv, cmd)
+                print(f"#   rc={res.returncode}  {cmd[:60]}...")
+                if res.returncode != 0:
+                    print(res.stderr, file=sys.stderr)
+                    return res.returncode
         print()
     return 0
 
@@ -1017,11 +1032,12 @@ def _pbs_run(pbs: PbsServer, command: str) -> CommandResult:
         "-o", "BatchMode=yes",
         "-o", "StrictHostKeyChecking=no",
         "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "ConnectTimeout=10",
     ]
-    if ssh_opts:
-        ssh_args += ["-o", ssh_opts]
     if ssh_key:
         ssh_args += ["-i", os.fspath(Path(ssh_key).expanduser())]
+    if ssh_opts:
+        ssh_args += shlex.split(ssh_opts)
     ssh_args += [f"{pbs.ssh_user}@{pbs.host}", "--", command]
     try:
         cp = subprocess.run(ssh_args, capture_output=True, text=True, timeout=60)
@@ -1036,6 +1052,7 @@ def _pbs_run(pbs: PbsServer, command: str) -> CommandResult:
 
 def cmd_pbs_status(args, _) -> int:
     """Show PBS datastore + snapshot summary for every PBS server."""
+    import json as _json
     try:
         data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
     except LabError as e:
@@ -1047,8 +1064,7 @@ def cmd_pbs_status(args, _) -> int:
     rc = 0
     for pbs in pbs_servers:
         print(f"# PBS: {pbs.name} ({pbs.host}:{pbs.ssh_port})  "
-              f"{len(pbs.datastores)} datastore(s)")
-        # Datastore list
+              f"{len(pbs.datastores)} datastore(s) declared in lab.yaml")
         res = _pbs_run(pbs, "proxmox-backup-manager datastore list --output-format json")
         if res.returncode != 0:
             print(f"  [FAIL] datastore list returned {res.returncode}", file=sys.stderr)
@@ -1056,10 +1072,20 @@ def cmd_pbs_status(args, _) -> int:
                 print(res.stderr, end="", file=sys.stderr)
             rc = 1
             continue
-        for line in res.stdout.splitlines():
-            if line.strip():
-                print(f"  datastore: {line.rstrip()}")
-        # Disk usage per datastore
+        # Parse the shim's JSON.  Robust against empty / malformed.
+        try:
+            payload = _json.loads(res.stdout or "{}")
+        except _json.JSONDecodeError as e:
+            print(f"  [FAIL] could not parse datastore list: {e}", file=sys.stderr)
+            rc = 1
+            continue
+        live = payload.get("datastores", [])
+        print(f"  {len(live)} datastore(s) registered on PBS")
+        for entry in live:
+            name = entry.get("name", "?")
+            path = entry.get("path", "?")
+            print(f"    - {name:14s}  {path}")
+        # Disk usage per declared datastore (path may or may not exist yet)
         for dsname, ds in pbs.datastores.items():
             du = _pbs_run(pbs, f"du -sh {ds.path} 2>/dev/null || echo unknown")
             print(f"  usage: {dsname} -> {du.stdout.strip() or '(unknown)'}")
@@ -1385,7 +1411,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--vm", help="Single VM name (default: all)")
     sp.set_defaults(func=cmd_stop)
 
-    sub.add_parser("backup", help="Show the backup commands for this lab").set_defaults(func=cmd_backup)
+    sp = sub.add_parser("backup", help="Show the backup commands for this lab")
+    sp.add_argument("--vm", help="Limit to one VM name (matches backup_jobs[].vm)")
+    sp.add_argument("--execute", action="store_true",
+                    help="Run the commands on the source PVE node (default: dry-run print)")
+    sp.set_defaults(func=cmd_backup)
 
     sp = sub.add_parser("drill", help="Walk a DR drill for one VM")
     sp.add_argument("--vm", required=True, help="VM name")

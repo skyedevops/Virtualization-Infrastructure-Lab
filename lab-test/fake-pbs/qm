@@ -37,16 +37,7 @@ fi
 } >> "$LOG_DIR/qm.log"
 
 cmd="${1:-}"
-# If we were invoked as `qmrestore` (via the symlink), the user passed
-# the snapshot as the first arg, not a subcommand.  Normalise so the
-# case dispatch below matches the `restore` clause.  In that case we
-# must NOT shift the first arg, because the restore case will read
-# $1 as the snap.
-if [[ "${0##*/}" == "qmrestore" ]]; then
-  cmd="restore"
-else
-  shift || true
-fi
+shift || true
 
 case "$cmd" in
   create)
@@ -155,30 +146,17 @@ case "$cmd" in
     # qmrestore is its own command in real Proxmox, but labctl's bash
     # scripts call `qmrestore DS:SNAP ...`.  Provide a stub that
     # records the call and writes a VM record.
-    # Note: if we were symlinked to qmrestore, ${0##*/} == "qmrestore"
-    # and cmd is already "restore" with no preceding "restore" word;
-    # otherwise the caller typed `qm restore ...` so the dispatcher
-    # has already shifted off "restore" and $1 is the snap.
-    snap="${1:-}"
+    snap="${2:-}"
     name=""
     vmid=""
     bridge=""
-    # For `qm restore <snap> ...` we already shifted the "restore" word
-    # in the dispatcher, so $1 is the snap.  For `qmrestore <snap> ...`
-    # via the symlink, we did NOT shift in the dispatcher (see the
-    # cmd="${1:-}" block above), so $1 is the snap here too.
+    shift 2 || true
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --name)   name="$2";   shift 2 ;;
         --vmid)   vmid="$2";   shift 2 ;;
         --bridge) bridge="$2"; shift 2 ;;
         --storage|--unique) shift 2 ;;
-        # Unknown long-flag: drop it AND its value if the next arg
-        # doesn't look like another flag.  This is the standard
-        # "parser-ignores-unknowns" pattern from GNU argp.
-        --*)
-          if [[ $# -ge 2 && "${2:-}" != --* ]]; then shift 2; else shift; fi
-          ;;
         *) shift ;;
       esac
     done

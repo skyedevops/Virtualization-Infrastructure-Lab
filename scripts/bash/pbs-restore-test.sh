@@ -47,10 +47,10 @@ done
 require() {
   for c in "$@"; do
     command -v "$c" >/dev/null 2>&1 \
-      || { echo "error: missing dependency: $c" >&2; exit 2; }
+      || { echo "error: missing dependency: $c" >&2; return 2; }
   done
 }
-require proxmox-backup-manager qm curl 2>/dev/null || true   # soft, we'll branch
+require proxmox-backup-manager qm curl || true   # soft, we'll branch
 
 LOG=/var/log/pbs-restore-test.log
 ts() { date -Iseconds; }

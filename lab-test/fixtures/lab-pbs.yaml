@@ -1,0 +1,101 @@
+lab:
+  name: pbs-e2e
+  description: 1 Proxmox + 1 PBS container for the labctl PBS integration test.
+
+networks:
+  servers:
+    vlan_id: 20
+    subnet: 10.10.20.0/24
+    gateway: 10.10.20.1
+    dhcp: false
+  restore_test:
+    vlan_id: 199
+    subnet: 10.10.199.0/24
+    gateway: 10.10.199.1
+    dhcp: false
+
+hypervisors:
+  pve01:
+    type: proxmox
+    host: 127.0.0.1
+    ssh_port_pve01: 23001
+    ssh_user: root
+    ssh_key: /workspaces/Virtualization-Infrastructure-Lab/lab-test/fixtures/id_ed25519
+    ssh_options: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    transport: ssh
+    default_bridge: vmbr0
+    default_storage: local-lvm
+    iso_storage: local
+
+pbs_servers:
+  pbs01:
+    host: 127.0.0.1
+    ssh_user: root
+    ssh_port_pbs01: 23002
+    ssh_key: /workspaces/Virtualization-Infrastructure-Lab/lab-test/fixtures/id_ed25519
+    ssh_options: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+    datastores:
+      main:
+        path: /backup/pbs/main
+        keep_last: 3
+        keep_daily: 7
+        keep_weekly: 4
+        keep_monthly: 6
+        prune_run: "mon..sat 02:00"
+      offsite:
+        path: /backup/pbs/offsite
+        keep_last: 2
+        keep_daily: 14
+        keep_weekly: 8
+        keep_monthly: 12
+        prune_run: "sun 03:00"
+
+vms:
+  - name: web01
+    hypervisor: pve01
+    vmid: 2001
+    role: web
+    network: servers
+    cpu: 2
+    memory_mb: 1024
+    disk_gb: 20
+    start_order: 30
+    onboot: true
+    notes: 1st VM, will be backed up + restored.
+
+  - name: db01
+    hypervisor: pve01
+    vmid: 2002
+    role: database
+    network: servers
+    cpu: 2
+    memory_mb: 2048
+    disk_gb: 50
+    start_order: 20
+    onboot: true
+    notes: 2nd VM, will be backed up to offsite.
+
+backup_jobs:
+  - name: nightly-web01
+    vm: web01
+    pbs: pbs01
+    datastore: main
+    schedule: "mon..sun 03:00"
+    mode: snapshot
+    keep_last: 3
+    keep_daily: 7
+    keep_weekly: 4
+    keep_monthly: 6
+    notes: Web server nightly backup to main.
+
+  - name: nightly-db01
+    vm: db01
+    pbs: pbs01
+    datastore: offsite
+    schedule: "mon..sun 03:30"
+    mode: snapshot
+    keep_last: 2
+    keep_daily: 14
+    keep_weekly: 8
+    keep_monthly: 12
+    notes: DB server nightly backup to offsite, longer retention.
