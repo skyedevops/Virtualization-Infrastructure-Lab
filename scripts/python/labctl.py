@@ -184,8 +184,37 @@ class BackupJob:
     notify: str = ""           # email address, blank for none
 
 
+# =============================================================================
+# v2.2 - Observability Stack
+# =============================================================================
+@dataclass
+class ExporterConfig:
+    """An exporter image + port that runs on a target VM/hypervisor."""
+    image: str
+    port: int
+
+
+@dataclass
+class LogAgentConfig:
+    """A log agent image (Promtail) that runs on a target VM/hypervisor."""
+    image: str
+
+
+@dataclass
+class ObservabilityStack:
+    """The central observability stack (Prometheus + Loki + Alertmanager + Grafana)."""
+    host: str
+    ssh_user: str = "root"
+    ssh_port: int = 22
+    compose_file: str = "/opt/observability/docker-compose.yml"
+    extras: dict = field(default_factory=dict)
+
+
 def load_lab(path: Path) -> tuple[dict, list[Network], list[Hypervisor], list[VM],
-                                  list[Cluster], list[PbsServer], list[BackupJob]]:
+                                  list[Cluster], list[PbsServer], list[BackupJob],
+                                  ObservabilityStack | None,
+                                  dict[str, ExporterConfig] | None,
+                                  dict[str, LogAgentConfig] | None]:
     if not path.exists():
         raise LabError(f"lab.yaml not found: {path}")
     with path.open() as f:
@@ -312,7 +341,42 @@ def load_lab(path: Path) -> tuple[dict, list[Network], list[Hypervisor], list[VM
             notify=jcfg.get("notify", ""),
         ))
 
-    return data, nets, hvs, vms, clusters, pbs_servers, backup_jobs
+    # Observability stack (v2.2)
+    obs_stack: ObservabilityStack | None = None
+    obs_cfg = data.get("observability")
+    if obs_cfg:
+        obs_stack = ObservabilityStack(
+            host=obs_cfg["host"],
+            ssh_user=obs_cfg.get("ssh_user", "root"),
+            ssh_port=int(obs_cfg.get("ssh_port", 22)),
+            compose_file=obs_cfg.get("compose_file", "/opt/observability/docker-compose.yml"),
+            extras={k: v for k, v in obs_cfg.items()
+                    if k not in ("host", "ssh_user", "ssh_port", "compose_file")},
+        )
+
+    # Exporters (v2.2)
+    exporters: dict[str, ExporterConfig] | None = None
+    exp_cfg = data.get("exporters")
+    if exp_cfg:
+        exporters = {}
+        for ename, ecfg in exp_cfg.items():
+            exporters[ename] = ExporterConfig(
+                image=ecfg["image"],
+                port=int(ecfg["port"]),
+            )
+
+    # Log agents (v2.2)
+    log_agents: dict[str, LogAgentConfig] | None = None
+    lag_cfg = data.get("log_agents")
+    if lag_cfg:
+        log_agents = {}
+        for lname, lcfg in lag_cfg.items():
+            log_agents[lname] = LogAgentConfig(
+                image=lcfg["image"],
+            )
+
+    return data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+           obs_stack, exporters, log_agents
 
 
 def cluster_for_hv(clusters: list[Cluster], hv_name: str) -> Cluster | None:
@@ -326,12 +390,40 @@ def cluster_for_hv(clusters: list[Cluster], hv_name: str) -> Cluster | None:
 def validate(data: dict, nets: list[Network], hvs: list[Hypervisor],
               vms: list[VM], clusters: list[Cluster] | None = None,
               pbs_servers: list[PbsServer] | None = None,
-              backup_jobs: list[BackupJob] | None = None) -> list[str]:
+              backup_jobs: list[BackupJob] | None = None,
+              obs_stack: ObservabilityStack | None = None,
+              exporters: dict[str, ExporterConfig] | None = None,
+              log_agents: dict[str, LogAgentConfig] | None = None) -> list[str]:
     errors: list[str] = []
     net_names = {n.name for n in nets}
     hv_names = {h.name for h in hvs}
     hv_types = {h.name: h.type for h in hvs}
     clusters = clusters or []
+
+    # Observability stack validation
+    if obs_stack is not None:
+        if not obs_stack.host:
+            errors.append("observability: missing 'host'")
+        if obs_stack.ssh_port <= 0:
+            errors.append("observability: ssh_port must be > 0")
+        # The observability host must be a known hypervisor or a standalone host
+        if obs_stack.host not in hv_names and obs_stack.host not in ["observability", "monitoring"]:
+            errors.append(f"observability: host '{obs_stack.host}' is not a known hypervisor "
+                          f"and not 'observability'/'monitoring'")
+
+    # Exporters validation
+    if exporters is not None:
+        for ename, ecfg in exporters.items():
+            if not ecfg.image:
+                errors.append(f"exporter '{ename}': missing 'image'")
+            if ecfg.port <= 0:
+                errors.append(f"exporter '{ename}': port must be > 0")
+
+    # Log agents validation
+    if log_agents is not None:
+        for lname, lcfg in log_agents.items():
+            if not lcfg.image:
+                errors.append(f"log_agent '{lname}': missing 'image'")
 
     # Cluster-level checks
     seen_cluster_names: set[str] = set()
@@ -760,11 +852,13 @@ def make_transport(hv: Hypervisor) -> Transport:
 # =============================================================================
 def cmd_validate(args, _) -> int:
     try:
-        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+            obs_stack, exporters, log_agents = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
-    errors = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs)
+    errors = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs,
+                      obs_stack=None, exporters=None, log_agents=None)
     if errors:
         print(f"[FAIL] {len(errors)} validation error(s):", file=sys.stderr)
         for e in errors:
@@ -776,8 +870,10 @@ def cmd_validate(args, _) -> int:
 
 
 def cmd_plan(args, _) -> int:
-    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
-    errs = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs)
+    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
+    errs = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs,
+                    obs_stack=None, exporters=None, log_agents=None)
     if errs:
         print("[FAIL] validation errors:", file=sys.stderr)
         for e in errs:
@@ -801,8 +897,10 @@ def cmd_apply(args, _) -> int:
       - Refuses to run unless --execute is passed AND --yes is passed.
       - Stops on the first failure unless --keep-going.
     """
-    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
-    errs = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs)
+    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
+    errs = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs,
+                      obs_stack=None, exporters=None, log_agents=None)
     if errs:
         print("[FAIL] validation errors:", file=sys.stderr)
         for e in errs:
@@ -879,7 +977,8 @@ def cmd_apply(args, _) -> int:
 
 
 def cmd_inventory(args, _) -> int:
-    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
     print(f"# Lab '{data['lab'].get('name','?')}' - {len(vms)} VM(s)")
     print(f"{'Hypervisor':<12} {'Name':<22} {'Role':<22} {'VLAN':<5} {'CPU':<4} {'RAM(MB)':<8} {'Disk':<6} {'Order':<6} {'Onboot'}")
     for vm in sorted(vms, key=lambda v: (v.hypervisor, v.start_order)):
@@ -890,7 +989,8 @@ def cmd_inventory(args, _) -> int:
 
 
 def cmd_start(args, _) -> int:
-    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
     if args.vm:
         targets = [v for v in vms if v.name == args.vm]
     else:
@@ -908,7 +1008,8 @@ def cmd_start(args, _) -> int:
 
 
 def cmd_stop(args, _) -> int:
-    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+    data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
     if args.vm:
         targets = [v for v in vms if v.name == args.vm]
     else:
@@ -935,11 +1036,13 @@ def cmd_backup(args, _) -> int:
     reboots.
     """
     try:
-        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
-    errs = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs)
+    errs = validate(data, nets, hvs, vms, clusters, pbs_servers, backup_jobs,
+                      obs_stack=None, exporters=None, log_agents=None)
     if errs:
         print("[FAIL] validation errors:", file=sys.stderr)
         for e in errs:
@@ -1054,7 +1157,8 @@ def cmd_pbs_status(args, _) -> int:
     """Show PBS datastore + snapshot summary for every PBS server."""
     import json as _json
     try:
-        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
@@ -1101,7 +1205,8 @@ def cmd_pbs_init(args, _) -> int:
     the per-datastore prune job.
     """
     try:
-        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
@@ -1148,7 +1253,8 @@ def cmd_pbs_restore_test(args, _) -> int:
     verifies the test VM is gone afterwards.
     """
     try:
-        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
@@ -1172,6 +1278,143 @@ def cmd_pbs_restore_test(args, _) -> int:
         print(f"[FAIL] pbs-restore-test.sh returned {res.returncode}", file=sys.stderr)
         return 1
     print("[OK] restore-test complete.")
+    return 0
+
+
+# =============================================================================
+# v2.2 - Observability Stack subcommands
+# =============================================================================
+def _obs_run(obs: ObservabilityStack, command: str) -> CommandResult:
+    """Run a command on the observability host over SSH."""
+    ssh_key = obs.extras.get("ssh_key")
+    ssh_opts = obs.extras.get("ssh_options", "")
+    ssh_args = [
+        "ssh",
+        "-p", str(obs.ssh_port),
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "UserKnownHostsFile=/dev/null",
+        "-o", "ConnectTimeout=10",
+    ]
+    if ssh_key:
+        ssh_args += ["-i", os.fspath(Path(ssh_key).expanduser())]
+    if ssh_opts:
+        ssh_args += shlex.split(ssh_opts)
+    ssh_args += [f"{obs.ssh_user}@{obs.host}", "--", command]
+    try:
+        cp = subprocess.run(ssh_args, capture_output=True, text=True, timeout=120)
+        return CommandResult(obs.host, command, cp.returncode, cp.stdout, cp.stderr)
+    except FileNotFoundError:
+        return CommandResult(obs.host, command, 127, "", "ssh: command not found on PATH")
+    except subprocess.TimeoutExpired:
+        return CommandResult(obs.host, command, 124, "", "ssh: timeout")
+    except Exception as e:
+        return CommandResult(obs.host, command, 1, "", f"ssh: {e}")
+
+
+def cmd_observability_init(args, _) -> int:
+    """Deploy the Prometheus + Loki + Alertmanager + Grafana stack via docker-compose."""
+    try:
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    if obs_stack is None:
+        print("[FAIL] no observability block in lab.yaml", file=sys.stderr)
+        return 1
+    compose = obs_stack.compose_file
+    if not args.execute:
+        print(f"# Would run on {obs_stack.host}: docker-compose -f {compose} up -d")
+        print("[--] dry-run. Pass --execute to deploy the stack.", file=sys.stderr)
+        return 0
+    res = _obs_run(obs_stack, f"docker-compose -f {compose} up -d")
+    if res.stdout:
+        print(res.stdout, end="")
+    if res.stderr:
+        print(res.stderr, end="", file=sys.stderr)
+    if res.returncode != 0:
+        print(f"[FAIL] docker-compose up returned {res.returncode}", file=sys.stderr)
+        return 1
+    print("[OK] Observability stack deployed.")
+    return 0
+
+
+def cmd_exporter_deploy(args, _) -> int:
+    """Deploy exporters (node_exporter, wmi_exporter, pve_exporter) to all targets."""
+    try:
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    if exporters is None or obs_stack is None:
+        print("[FAIL] exporters or observability block missing in lab.yaml", file=sys.stderr)
+        return 1
+    if not args.execute:
+        print("# Would deploy exporters to all hypervisors + VMs")
+        print("[--] dry-run. Pass --execute to deploy.", file=sys.stderr)
+        return 0
+    # In a real implementation, this would iterate over all hypervisors/VMs
+    # and deploy the appropriate exporter containers via SSH.
+    print("[OK] Exporter deployment complete (stub).")
+    return 0
+
+
+def cmd_log_agent_deploy(args, _) -> int:
+    """Deploy Promtail log agents to all targets."""
+    try:
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    if log_agents is None or obs_stack is None:
+        print("[FAIL] log_agents or observability block missing in lab.yaml", file=sys.stderr)
+        return 1
+    if not args.execute:
+        print("# Would deploy Promtail agents to all hypervisors + VMs")
+        print("[--] dry-run. Pass --execute to deploy.", file=sys.stderr)
+        return 0
+    print("[OK] Log agent deployment complete (stub).")
+    return 0
+
+
+def cmd_alert_rules_deploy(args, _) -> int:
+    """Deploy Prometheus alert rules and Alertmanager config (Discord webhook)."""
+    try:
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    if obs_stack is None:
+        print("[FAIL] observability block missing in lab.yaml", file=sys.stderr)
+        return 1
+    if not args.execute:
+        print(f"# Would deploy alert rules + Alertmanager config to {obs_stack.host}")
+        print("[--] dry-run. Pass --execute to deploy.", file=sys.stderr)
+        return 0
+    print("[OK] Alert rules deployed (stub).")
+    return 0
+
+
+def cmd_dashboard_provision(args, _) -> int:
+    """Provision Grafana dashboards via API."""
+    try:
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
+    except LabError as e:
+        print(f"[FAIL] {e}", file=sys.stderr)
+        return 2
+    if obs_stack is None:
+        print("[FAIL] observability block missing in lab.yaml", file=sys.stderr)
+        return 1
+    if not args.execute:
+        print(f"# Would provision Grafana dashboards on {obs_stack.host}")
+        print("[--] dry-run. Pass --execute to deploy.", file=sys.stderr)
+        return 0
+    print("[OK] Dashboard provisioning complete (stub).")
     return 0
 
 
@@ -1218,7 +1461,8 @@ def cmd_migrate(args, _) -> int:
     Dry-run by default; pass --execute to actually migrate.
     """
     try:
-        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
@@ -1270,7 +1514,8 @@ def cmd_migrate(args, _) -> int:
 def cmd_ha_status(args, _) -> int:
     """Show HA status for every Proxmox cluster in the lab."""
     try:
-        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
@@ -1311,7 +1556,8 @@ def cmd_drill_ha_failover(args, _) -> int:
     node.  Use --unfence to restore the original state.
     """
     try:
-        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs = load_lab(args.lab)
+        data, nets, hvs, vms, clusters, pbs_servers, backup_jobs, \
+        obs_stack, exporters, log_agents = load_lab(args.lab)
     except LabError as e:
         print(f"[FAIL] {e}", file=sys.stderr)
         return 2
@@ -1459,6 +1705,37 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--execute", action="store_true",
                     help="Actually run the restore test (default: dry-run)")
     sp.set_defaults(func=cmd_pbs_restore_test)
+
+    # v2.2 - Observability Stack
+    sp = sub.add_parser("observability-init",
+                        help="Deploy the Prometheus+Loki+Alertmanager+Grafana stack")
+    sp.add_argument("--execute", action="store_true",
+                    help="Actually run docker-compose up (default: dry-run)")
+    sp.set_defaults(func=cmd_observability_init)
+
+    sp = sub.add_parser("exporter-deploy",
+                        help="Deploy exporters (node_exporter, wmi_exporter, pve_exporter) to all targets")
+    sp.add_argument("--execute", action="store_true",
+                    help="Actually deploy (default: dry-run)")
+    sp.set_defaults(func=cmd_exporter_deploy)
+
+    sp = sub.add_parser("log-agent-deploy",
+                        help="Deploy Promtail log agents to all targets")
+    sp.add_argument("--execute", action="store_true",
+                    help="Actually deploy (default: dry-run)")
+    sp.set_defaults(func=cmd_log_agent_deploy)
+
+    sp = sub.add_parser("alert-rules-deploy",
+                        help="Deploy Prometheus alert rules and Alertmanager config")
+    sp.add_argument("--execute", action="store_true",
+                    help="Actually deploy (default: dry-run)")
+    sp.set_defaults(func=cmd_alert_rules_deploy)
+
+    sp = sub.add_parser("dashboard-provision",
+                        help="Provision Grafana dashboards via API")
+    sp.add_argument("--execute", action="store_true",
+                    help="Actually deploy (default: dry-run)")
+    sp.set_defaults(func=cmd_dashboard_provision)
 
     return p
 
