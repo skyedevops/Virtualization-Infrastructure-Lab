@@ -20,7 +20,7 @@ Running a few VMs is simple; managing a virtualized datacenter is complex. The c
 ### 🏗️ Lab Architecture
 The lab is designed as a tiered ecosystem, moving from simple testing to complex clustering.
 
-![Home Lab Topology](homelab-topology.png)
+![Home Lab Topology](diagrams/homelab-topology.png)
 
 ### 🎯 Key Engineering Implementations
 
